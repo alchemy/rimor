@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -40,24 +41,54 @@ func newKeymap(s config.Settings) keymap {
 	return k
 }
 
-// first returns the first direct binding of an action, for hints.
-func (k keymap) first(action string) string {
+// first returns the first direct binding of an action that the terminal
+// can report, for hints; see needsDisambiguation.
+func (k keymap) first(action string, disambiguated bool) string {
+	usable := func(key string) bool {
+		return k.direct[key] == action && (disambiguated || !needsDisambiguation(key))
+	}
 	for _, a := range config.Actions {
 		if a.Name != action {
 			continue
 		}
-		for _, key := range a.Defaults {
-			if k.direct[config.Normalize(key)] == action {
+		for _, key := range a.Defaults { // in the documented order
+			if key = config.Normalize(key); usable(key) {
 				return key
 			}
 		}
 	}
-	for key, a := range k.direct {
-		if a == action {
+	for key := range k.direct { // custom bindings
+		if usable(key) {
 			return key
 		}
 	}
 	return ""
+}
+
+// needsDisambiguation reports keys that legacy terminals send exactly like
+// another key (ctrl+enter arrives as enter); they only work where the
+// terminal speaks the kitty keyboard protocol, which Bubble Tea detects.
+func needsDisambiguation(key string) bool {
+	parts := strings.Split(key, "+")
+	base := parts[len(parts)-1]
+	switch base {
+	case "enter", "tab", "backspace", "esc", "space":
+		return len(parts) > 1 && slices.ContainsFunc(parts[:len(parts)-1], func(m string) bool {
+			return m == "ctrl" || m == "shift"
+		})
+	}
+	return false
+}
+
+// keyHint renders a binding the way the hints do: ^x for ctrl+x, ⏎ for enter.
+func keyHint(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) > 1 && key[0] == 'f' && key[1] >= '0' && key[1] <= '9' {
+		return "F" + key[1:] // f5 → F5
+	}
+	return strings.ReplaceAll(shortKey(key), "enter", "⏎")
 }
 
 // shortKey abbreviates ctrl+x to ^x for compact hints.

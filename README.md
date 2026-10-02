@@ -141,9 +141,12 @@ Use `shift`+drag for the terminal's own text selection.
 - **macOS:** Terminal.app and iTerm2 send special characters for Option+key by
   default. Enable *Use Option as Meta key* (Terminal) or *Option key: Esc+*
   (iTerm2), or use the leader key. In Ghostty, set `macos-option-as-alt`.
-- **Windows Terminal** uses `alt+enter` and `alt+shift+arrows` itself. Use
-  `ctrl+enter`/`F5` to run and `ctrl+g` then the arrows to resize, or
-  remap the keys.
+- **Windows Terminal** sends `ctrl+enter` as a plain Enter, and uses
+  `alt+enter` and `alt+shift+arrows` itself. Run with `F5`, resize with
+  `ctrl+g` then the arrows, or remap the keys.
+- `ctrl+enter` needs a terminal that speaks the kitty keyboard protocol
+  (kitty, Ghostty, WezTerm, foot, recent Alacritty). rimor detects this and
+  shows `^⏎` in its hints only where it works; elsewhere they show `F5`.
 
 ## Configuration
 

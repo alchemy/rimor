@@ -160,6 +160,7 @@ func (t *tab) dropSession() {
 // ResultsPane shows the outcome of the active tab's last run.
 type ResultsPane struct {
 	width, height int
+	runKey        string // the run key for hints, as the terminal reports it
 }
 
 func (rp *ResultsPane) SetSize(width, height int) { rp.width, rp.height = width, height }
@@ -218,7 +219,7 @@ func (rp *ResultsPane) Update(msg tea.KeyPressMsg, t *tab) tea.Cmd {
 func (rp *ResultsPane) View(t *tab, spin string, focused bool) string {
 	if t == nil || t.run == nil {
 		return rp.center(mutedStyle.Italic(true).Render("Run a query to see results") + "\n\n" +
-			hints("^⏎", "run", "F5", "run"))
+			hints(rp.runKey, "run"))
 	}
 	r := t.run
 	switch {

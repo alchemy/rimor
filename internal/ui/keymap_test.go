@@ -107,3 +107,41 @@ func TestLeaderIgnoredInDialogs(t *testing.T) {
 		t.Fatal("leader captured inside a dialog")
 	}
 }
+
+func TestRunHintFollowsTerminal(t *testing.T) {
+	d := layoutDriver(t, "")
+	d.key("alt+2")
+	footer := func() string { return ansi.Strip(d.m.query.Footer(true)) }
+
+	// Legacy terminals (Windows Terminal, Terminal.app) send ctrl+enter as
+	// enter, so the hint offers F5 until the terminal says otherwise.
+	if f := footer(); !strings.Contains(f, "F5 run") || strings.Contains(f, "^⏎") {
+		t.Errorf("legacy footer = %q", f)
+	}
+	if s := d.results(); !strings.Contains(s, "F5 run") {
+		t.Errorf("legacy results hint:\n%s", s)
+	}
+
+	d.send(tea.KeyboardEnhancementsMsg{Flags: 1}) // kitty keyboard protocol confirmed
+	if f := footer(); !strings.Contains(f, "^⏎ run") {
+		t.Errorf("enhanced footer = %q", f)
+	}
+}
+
+func TestKeyHints(t *testing.T) {
+	for key, want := range map[string]bool{
+		"ctrl+enter": true, "shift+enter": true, "ctrl+tab": true, "ctrl+backspace": true,
+		"enter": false, "alt+enter": false, "f5": false, "ctrl+t": false, "alt+shift+1": false,
+	} {
+		if got := needsDisambiguation(key); got != want {
+			t.Errorf("needsDisambiguation(%q) = %v", key, got)
+		}
+	}
+	for key, want := range map[string]string{
+		"ctrl+enter": "^⏎", "f5": "F5", "alt+enter": "alt+⏎", "ctrl+r": "^r", "": "",
+	} {
+		if got := keyHint(key); got != want {
+			t.Errorf("keyHint(%q) = %q, want %q", key, got, want)
+		}
+	}
+}

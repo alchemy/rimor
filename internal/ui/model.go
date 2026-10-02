@@ -45,6 +45,11 @@ type Model struct {
 	keys         keymap
 	leader       bool // the leader key was pressed; the next key picks an action
 	leaderRepeat bool // a resize step ran; further steps need no new leader
+
+	// disambiguated is set once the terminal confirms the kitty keyboard
+	// protocol, so keys such as ctrl+enter can be told apart and shown in
+	// hints; until then hints use keys every terminal reports.
+	disambiguated bool
 }
 
 // New builds the UI from settings, saved connections and the last session.
@@ -56,13 +61,14 @@ func New(store db.Store, sessionPath string, settings config.Settings) Model {
 			focusExplorer: {index: 1, title: "Explorer"},
 			focusQuery:    {index: 2, title: "Query"},
 			focusResults: {index: 3, title: "Results",
-				footer: hints(shortKey(keys.leader), "keys", shortKey(keys.first("quit")), "quit")},
+				footer: hints(shortKey(keys.leader), "keys", shortKey(keys.first("quit", false)), "quit")},
 		},
 		keys:        keys,
 		explorer:    NewExplorer(store),
 		sessionPath: sessionPath,
 		split:       defaultLayout(),
 	}
+	m.updateRunHint()
 	m.query.spinner = spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle()))
 	if sessionPath != "" {
 		s, err := loadSession(sessionPath)
@@ -105,6 +111,12 @@ func (m *Model) setFocus(f focus) {
 	} else {
 		m.query.Blur()
 	}
+}
+
+// updateRunHint shows the first run key this terminal can report.
+func (m *Model) updateRunHint() {
+	key := keyHint(m.keys.first("run", m.disambiguated))
+	m.query.runKey, m.results.runKey = key, key
 }
 
 // setFullScreen shows only the focused pane, over the whole screen.
@@ -194,6 +206,10 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case runDoneMsg:
 		return m.query.Update(msg)
+	case tea.KeyboardEnhancementsMsg:
+		m.disambiguated = msg.SupportsKeyDisambiguation()
+		m.updateRunHint()
+		return nil
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
@@ -341,7 +357,7 @@ func (m Model) renderPane(f focus, width, height int) string {
 	case indicator && m.leader:
 		p.corner = accentStyle.Render(m.keys.leader + " …")
 	case m.split.full:
-		if key := m.keys.first("full_screen"); key != "" {
+		if key := m.keys.first("full_screen", m.disambiguated); key != "" {
 			p.corner = hints(key, "exit full screen")
 		} else {
 			p.corner = mutedStyle.Render("full screen")

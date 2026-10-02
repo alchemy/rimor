@@ -134,6 +134,7 @@ type QueryPane struct {
 	focused       bool
 	notice        string // shown in the footer until the next key
 	spinner       spinner.Model
+	runKey        string // the run key for hints, as the terminal reports it
 }
 
 func (q *QueryPane) current() *tab {
@@ -441,5 +442,5 @@ func (q *QueryPane) Footer(focused bool) string {
 	}
 	line, col := t.ed.CursorPosition()
 	return mutedStyle.Render(fmt.Sprintf("%d:%d", line+1, col+1)) + "  " +
-		hints("^⏎", "run", "^e", "context", "^s", "save")
+		hints(q.runKey, "run", "^e", "context", "^s", "save")
 }
