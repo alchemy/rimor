@@ -34,14 +34,23 @@ func (sqlserver) Children(ctx context.Context, conn *sql.DB, p *Object) ([]Objec
 
 	switch p.Kind {
 	case KindDatabase:
-		// User schemas only: skip the fixed database-role schemas (>= 16384)
-		// and the built-in system ones.
-		return queryObjects(ctx, conn, func(name, _ string) Object {
-			return Object{Kind: KindSchema, Name: name, Schema: name}
-		}, `
-			SELECT name, '' FROM sys.schemas
-			WHERE schema_id < 16384 AND name NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest')
-			ORDER BY name`)
+		// Every schema except the fixed database-role ones (>= 16384) and
+		// the built-in system ones, marked empty when the login sees no
+		// objects, user types or XML schema collections in it. One query
+		// per database; sys.objects is indexed by schema.
+		return queryObjects(ctx, conn, schemaObject, `
+			SELECT s.name,
+			       CASE WHEN s.name = SCHEMA_NAME()
+			              OR EXISTS (SELECT 1 FROM sys.objects o
+			                         WHERE o.schema_id = s.schema_id AND o.is_ms_shipped = 0)
+			              OR EXISTS (SELECT 1 FROM sys.types t
+			                         WHERE t.schema_id = s.schema_id AND t.is_user_defined = 1)
+			              OR EXISTS (SELECT 1 FROM sys.xml_schema_collections x
+			                         WHERE x.schema_id = s.schema_id AND x.xml_collection_id > 1)
+			            THEN '' ELSE 'empty' END
+			FROM sys.schemas s
+			WHERE s.schema_id < 16384 AND s.name NOT IN ('sys', 'INFORMATION_SCHEMA')
+			ORDER BY s.name`)
 	case KindSchema:
 		return []Object{
 			folder("Tables", KindTable, p.Schema, ""),

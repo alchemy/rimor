@@ -172,6 +172,15 @@ type Object struct {
 	Contains Kind
 	// Primary marks primary key columns and indexes.
 	Primary bool
+	// Empty marks schemas with nothing the login can see: no objects, user
+	// types or XML schema collections. The explorer hides them unless asked.
+	// The user's default schema is never empty.
+	Empty bool
+}
+
+// schemaObject builds a schema from a (name, "empty" or "") row.
+func schemaObject(name, empty string) Object {
+	return Object{Kind: KindSchema, Name: name, Schema: name, Empty: empty == "empty"}
 }
 
 // Expandable reports whether the object has children.

@@ -36,7 +36,9 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
 - **Explorer.** Saved connections and the catalog as a tree: databases,
   schemas, tables, views, materialized views, functions, procedures,
   sequences, indexes, triggers and columns with their types. Levels load
-  when you expand them, without freezing the UI.
+  when you expand them, without freezing the UI. Built-in schemas are left
+  out, and so are schemas with nothing in them, so a typical SQL Server
+  database shows just `dbo`. `.` on a database lists the empty ones too.
 - **Query tabs.** Each tab has a *context*, a connection plus an optional
   database, shown in the pane's bottom border. A new tab takes the context
   of the item selected in the explorer, and `ctrl+e` changes it. Tabs save
@@ -120,7 +122,7 @@ on its own to list them.
 
 **Explorer:** `j`/`k` or the arrows move, `enter`/`l` expands, `h` collapses,
 `a` adds a connection, `e` edits it, `d` deletes it, `r` refreshes, `x`
-disconnects.
+disconnects, `.` shows or hides a database's empty schemas.
 
 **Query:** `ctrl+s` saves, `alt+s` saves as, `ctrl+w` closes the tab,
 `ctrl+pgup/pgdn` or `alt+[`/`alt+]` switch tabs, `ctrl+e` changes the context,
@@ -179,6 +181,10 @@ results) are not remappable yet.
   to run one of several. SQL Server batches work, and the first result set
   with columns is shown.
 - Results stop at 1,000 rows.
+- A schema counts as empty when the login sees no objects, user types or XML
+  schema collections in it, so a schema whose objects you lack permission
+  to see is hidden too. The note under the database says how many are
+  hidden, and `.` shows them.
 - Copying uses the terminal's clipboard support (OSC 52), which
   Terminal.app lacks and iTerm2 has off by default.
 

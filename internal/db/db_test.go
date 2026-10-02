@@ -215,3 +215,64 @@ func TestStoreInit(t *testing.T) {
 		t.Fatalf("after second Init = %v, %v", got, err)
 	}
 }
+
+// TestSchemaEmptiness needs the fixture schemas from TestPostgres' setup:
+// staging (empty), types_only, funcs_only and seq_only.
+func TestPostgresSchemaEmptiness(t *testing.T) {
+	ctx := context.Background()
+	pool := NewPool(Config{Driver: Postgres, DSN: serverDSN(t, "RIMOR_TEST_POSTGRES")})
+	defer pool.Close()
+	dbs, err := pool.Children(ctx, nil)
+	if err != nil || len(dbs) == 0 {
+		t.Fatal(dbs, err)
+	}
+	var def Object
+	for _, d := range dbs {
+		if d.Detail == "default" {
+			def = d
+		}
+	}
+	schemas, err := pool.Children(ctx, &def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := map[string]bool{}
+	for _, s := range schemas {
+		empty[s.Name] = s.Empty
+	}
+	for name, want := range map[string]bool{
+		"staging": true, "types_only": false, "funcs_only": false, "seq_only": false,
+		"public": false, // the default schema, never hidden
+	} {
+		got, ok := empty[name]
+		if !ok {
+			t.Skipf("fixture schema %q missing", name)
+		}
+		if got != want {
+			t.Errorf("%s: empty = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestSQLServerSchemaEmptiness(t *testing.T) {
+	ctx := context.Background()
+	pool := NewPool(Config{Driver: SQLServer, DSN: serverDSN(t, "RIMOR_TEST_SQLSERVER")})
+	defer pool.Close()
+	dbs, err := pool.Children(ctx, nil)
+	if err != nil || len(dbs) == 0 {
+		t.Fatal(dbs, err)
+	}
+	schemas, err := pool.Children(ctx, &dbs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range schemas {
+		t.Logf("%-24s empty=%v", s.Name, s.Empty)
+		if s.Name == "dbo" && s.Empty {
+			t.Errorf("dbo marked empty")
+		}
+		if s.Name == "sys" || s.Name == "INFORMATION_SCHEMA" || strings.HasPrefix(s.Name, "db_") {
+			t.Errorf("built-in schema %s listed", s.Name)
+		}
+	}
+}

@@ -31,13 +31,20 @@ func (postgres) Children(ctx context.Context, conn *sql.DB, p *Object) ([]Object
 
 	switch p.Kind {
 	case KindDatabase:
-		return queryObjects(ctx, conn, func(name, _ string) Object {
-			return Object{Kind: KindSchema, Name: name, Schema: name}
-		}, `
-			SELECT nspname, ''
-			FROM pg_namespace
-			WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema'
-			ORDER BY nspname`)
+		// Every schema that is not built in, marked empty when it holds no
+		// relations, functions or types of its own (row and array types
+		// come with their tables and element types).
+		return queryObjects(ctx, conn, schemaObject, `
+			SELECT n.nspname,
+			       CASE WHEN n.nspname = current_schema()
+			              OR EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid)
+			              OR EXISTS (SELECT 1 FROM pg_proc f WHERE f.pronamespace = n.oid)
+			              OR EXISTS (SELECT 1 FROM pg_type t
+			                         WHERE t.typnamespace = n.oid AND t.typrelid = 0 AND t.typcategory <> 'A')
+			            THEN '' ELSE 'empty' END
+			FROM pg_namespace n
+			WHERE n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema'
+			ORDER BY n.nspname`)
 	case KindSchema:
 		return []Object{
 			folder("Tables", KindTable, p.Schema, ""),

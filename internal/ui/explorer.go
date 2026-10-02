@@ -52,9 +52,34 @@ type node struct {
 	err      error
 	// gen invalidates in-flight loads when the node is reset or reloaded.
 	gen int
+	// showAll lists the empty schemas of a database, hidden by default.
+	showAll bool
 }
 
 func (n *node) expandable() bool { return n.root || n.obj.Expandable() }
+
+// visibleChildren are the children the tree shows: all of them, except
+// empty schemas unless the database shows all. hidden counts the rest.
+func (n *node) visibleChildren() (visible []*node, hidden int) {
+	for _, c := range n.children {
+		if c.obj.Kind == db.KindSchema && c.obj.Empty && !n.showAll {
+			hidden++
+			continue
+		}
+		visible = append(visible, c)
+	}
+	return visible, hidden
+}
+
+// database is the database node a node belongs to, if any.
+func (n *node) database() *node {
+	for ; n != nil; n = n.parent {
+		if !n.root && n.obj.Kind == db.KindDatabase {
+			return n
+		}
+	}
+	return nil
+}
 
 // reset forgets everything loaded below the node.
 func (n *node) reset() {
@@ -179,7 +204,9 @@ func (e *Explorer) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		switch {
 		case n == nil:
 		case n.expanded && len(n.children) > 0:
-			e.cursor = n.children[0]
+			if visible, _ := n.visibleChildren(); len(visible) > 0 {
+				e.cursor = visible[0]
+			}
 		case !n.expanded:
 			return e.toggle(n)
 		}
@@ -209,6 +236,11 @@ func (e *Explorer) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "x":
 		if e.cursor != nil {
 			e.disconnect(e.cursor.conn)
+		}
+	case ".":
+		// Show or hide the empty schemas of the database under the cursor.
+		if d := e.cursor.database(); d != nil {
+			d.showAll = !d.showAll
 		}
 	}
 	return nil
@@ -288,6 +320,8 @@ func (e *Explorer) Hints() string {
 		return hints("⏎", "new connection")
 	case e.cursor.root:
 		return hints("⏎", "open", "e", "edit", "d", "del")
+	case e.cursor.obj.Kind == db.KindDatabase:
+		return hints("⏎", "expand", ".", "schemas")
 	default:
 		return hints("⏎", "expand", "^t", "query")
 	}
@@ -476,11 +510,24 @@ func (e *Explorer) lines() []line {
 			}
 			return
 		}
+		visible, hidden := n.visibleChildren()
 		if n.loaded && len(n.children) == 0 {
 			ls = append(ls, line{text: mutedStyle.Italic(true).Render("empty"), depth: depth + 1})
 		}
-		for _, c := range n.children {
+		for _, c := range visible {
 			walk(c, depth+1)
+		}
+		// Say what the filter hides: "nothing visible" also covers schemas
+		// whose objects the login may not see.
+		if hidden > 0 {
+			what := strconv.Itoa(hidden) + " schemas"
+			if hidden == 1 {
+				what = "1 schema"
+			}
+			note := what + " with nothing visible · . shows"
+			for _, t := range wrapLines(note, e.width-3-2*(depth+1), 2) {
+				ls = append(ls, line{text: mutedStyle.Italic(true).Render(t), depth: depth + 1})
+			}
 		}
 	}
 	for _, r := range e.roots {
@@ -629,11 +676,16 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 			nameStyle = nameStyle.Bold(true)
 		} else {
 			ic = objectIcon(n.obj, n.expanded)
-			if n.obj.Kind == db.KindFolder {
+			switch {
+			case n.obj.Kind == db.KindFolder:
 				nameStyle = titleStyle
 				if n.loaded {
 					detail = strconv.Itoa(len(n.children))
 				}
+			case n.obj.Kind == db.KindSchema && n.obj.Empty:
+				nameStyle, detail = mutedStyle, "empty" // shown only with all schemas
+			case n.obj.Kind == db.KindDatabase && n.showAll:
+				detail = strings.TrimSpace(detail + "  + empty") // empty schemas are listed
 			}
 		}
 		if current && !focused {
