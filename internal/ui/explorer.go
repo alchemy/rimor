@@ -104,6 +104,9 @@ type loadedMsg struct {
 // openFormMsg asks for the connection form; a nil conn means a new one.
 type openFormMsg struct{ conn *connection }
 
+// disconnectMsg asks to close a connection's open handles.
+type disconnectMsg struct{ conn *connection }
+
 // confirmDeleteMsg asks to confirm removing a saved connection.
 type confirmDeleteMsg struct{ conn *connection }
 
@@ -235,7 +238,9 @@ func (e *Explorer) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return e.refresh()
 	case "x":
 		if e.cursor != nil {
-			e.disconnect(e.cursor.conn)
+			// The model stops the connection's running queries first.
+			conn := e.cursor.conn
+			return func() tea.Msg { return disconnectMsg{conn} }
 		}
 	case ".":
 		// Show or hide the empty schemas of the database under the cursor.

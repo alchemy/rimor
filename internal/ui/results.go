@@ -27,13 +27,21 @@ type run struct {
 	col     int // buffer column of the query's first character
 	started time.Time
 	cancel  context.CancelFunc
-	running bool
+	running bool // executing; the result is not back yet
 
 	res *db.Result
 	err *db.Error
 
 	grid grid
 }
+
+// fetching reports whether rows are still arriving.
+func (r *run) fetching() bool {
+	return r.res != nil && r.res.Rows != nil && !r.res.Rows.Progress().Done
+}
+
+// busy reports whether the run still uses the tab's session.
+func (r *run) busy() bool { return r != nil && (r.running || r.fetching()) }
 
 type runDoneMsg struct {
 	tab     *tab
@@ -43,9 +51,29 @@ type runDoneMsg struct {
 	session *sql.Conn
 }
 
+// rowsMsg reports that more rows arrived, or that fetching ended.
+type rowsMsg struct {
+	tab *tab
+	gen int
+}
+
+// rowsRefresh is how often the grid redraws while rows arrive.
+const rowsRefresh = 80 * time.Millisecond
+
+// watchRows waits for the next batch of rows.
+func watchRows(t *tab, gen int, set *db.RowSet) tea.Cmd {
+	return func() tea.Msg {
+		<-set.Updated()
+		if !set.Progress().Done {
+			time.Sleep(rowsRefresh) // batch redraws while rows pour in
+		}
+		return rowsMsg{t, gen}
+	}
+}
+
 // Run executes the selection, or the whole tab, on the tab's session.
 func (q *QueryPane) Run(t *tab) tea.Cmd {
-	if t.run != nil && t.run.running {
+	if t.run.busy() {
 		return nil
 	}
 	if t.ctx.conn == nil {
@@ -73,20 +101,25 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 	t.sessionCtx = t.ctx
 
 	gen, pool, database, session := t.runs, t.ctx.conn.pool, t.ctx.database, t.session
+	opts := db.RunOptions{MemoryLimit: q.memoryLimit, Cancel: cancel}
 	exec := func() tea.Msg {
-		defer cancel()
 		for attempt := 0; ; attempt++ {
 			if session == nil {
 				s, err := pool.Session(ctx, database)
 				if err != nil {
+					cancel()
 					return runDoneMsg{tab: t, gen: gen, err: err}
 				}
 				session = s
 			}
-			res, err := db.Run(ctx, session, text)
+			// Run releases the context itself, when the statement or the
+			// fetch of its rows ends.
+			res, err := db.Run(ctx, session, text, opts)
 			if err != nil && attempt == 0 && db.IsConnLost(err) {
-				pool.Release(session) // the connection went away; retry on a fresh one
+				go pool.Release(session) // the connection went away; retry on a fresh one
 				session = nil
+				ctx, cancel = context.WithCancel(context.Background())
+				opts.Cancel = cancel
 				continue
 			}
 			return runDoneMsg{tab: t, gen: gen, res: res, err: err, session: session}
@@ -99,29 +132,28 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 	return exec
 }
 
+// running counts tabs whose runs still use their session.
 func (q *QueryPane) running() int {
 	n := 0
 	for _, t := range q.tabs {
-		if t.run != nil && t.run.running {
+		if t.run.busy() {
 			n++
 		}
 	}
 	return n
 }
 
-// finish records the outcome of a run.
-func (q *QueryPane) finish(msg runDoneMsg) {
+// finish records the outcome of a run and starts watching its rows.
+func (q *QueryPane) finish(msg runDoneMsg) tea.Cmd {
 	t := msg.tab
 	if msg.session != nil && msg.session != t.session {
 		t.dropSession()
 		t.session = msg.session
 	}
-	if t.closed || t.sessionCtx != t.ctx {
-		t.dropSession() // the tab went away or moved to another context meanwhile
-	}
 	r := t.run
 	if r == nil || r.gen != msg.gen {
-		return
+		t.releaseIfStale()
+		return nil
 	}
 	r.running = false
 	r.res = msg.res
@@ -132,25 +164,68 @@ func (q *QueryPane) finish(msg runDoneMsg) {
 			t.dropSession()
 		}
 	}
+	t.releaseIfStale()
+	if r.res != nil && r.res.Rows != nil {
+		return watchRows(t, r.gen, r.res.Rows)
+	}
+	return nil
 }
 
-// cancelRun stops the tab's running statement, if any.
+// rowsArrived handles a rowsMsg: keep watching until fetching ends.
+func (q *QueryPane) rowsArrived(msg rowsMsg) tea.Cmd {
+	t := msg.tab
+	r := t.run
+	if r == nil || r.gen != msg.gen || r.res == nil || r.res.Rows == nil {
+		return nil
+	}
+	set := r.res.Rows
+	p := set.Progress()
+	if !p.Done {
+		return watchRows(t, r.gen, set)
+	}
+	if p.Err != nil && p.Rows == 0 {
+		e := db.Describe(p.Err) // failed before any row: show it as an error
+		r.err = &e
+	}
+	t.releaseIfStale()
+	return nil
+}
+
+// releaseIfStale drops the session once the run is over if the tab was
+// closed or moved to another context meanwhile.
+func (t *tab) releaseIfStale() {
+	if (t.closed || t.sessionCtx != t.ctx) && !t.run.busy() {
+		t.dropSession()
+	}
+}
+
+// cancelRun stops the tab's statement, or the fetch of its rows; rows
+// fetched so far stay.
 func (t *tab) cancelRun() bool {
-	if t.run != nil && t.run.running {
+	switch {
+	case t.run == nil:
+		return false
+	case t.run.running:
 		t.run.cancel()
+		return true
+	case t.run.fetching():
+		t.run.res.Rows.Stop()
 		return true
 	}
 	return false
 }
 
+// dropSession gives the session back. Closing waits for open rows, so it
+// happens in the background; callers stop any fetch first.
 func (t *tab) dropSession() {
 	if t.session == nil {
 		return
 	}
-	if t.sessionCtx.conn != nil {
-		t.sessionCtx.conn.pool.Release(t.session)
+	s := t.session
+	if conn := t.sessionCtx.conn; conn != nil {
+		go conn.pool.Release(s)
 	} else {
-		t.session.Close()
+		go s.Close()
 	}
 	t.session = nil
 }
@@ -161,6 +236,7 @@ func (t *tab) dropSession() {
 type ResultsPane struct {
 	width, height int
 	runKey        string // the run key for hints, as the terminal reports it
+	memoryLimit   int64  // for the "stopped at the limit" status
 }
 
 func (rp *ResultsPane) SetSize(width, height int) { rp.width, rp.height = width, height }
@@ -176,7 +252,8 @@ func (rp *ResultsPane) Update(msg tea.KeyPressMsg, t *tab) tea.Cmd {
 	if r.res == nil || !r.res.HasRows() {
 		return nil
 	}
-	g, res := &r.grid, r.res
+	g, set := &r.grid, r.res.Rows
+	n, cols := set.Len(), len(set.Columns())
 	page := max(rp.height-3, 1)
 	switch msg.String() {
 	case "up", "k":
@@ -194,25 +271,25 @@ func (rp *ResultsPane) Update(msg tea.KeyPressMsg, t *tab) tea.Cmd {
 	case "g", "ctrl+home":
 		g.row = 0
 	case "G", "ctrl+end":
-		g.row = len(res.Rows) - 1
+		g.row = n - 1
 	case "home", "0":
 		g.col = 0
 	case "end", "$":
-		g.col = len(res.Columns) - 1
+		g.col = cols - 1
 	case "y":
-		if g.row < len(res.Rows) {
-			return tea.SetClipboard(res.Rows[g.row][g.col].Text)
+		if g.row < n {
+			return tea.SetClipboard(set.Cell(g.row, g.col).Text)
 		}
 	case "Y":
-		if g.row < len(res.Rows) {
-			cells := make([]string, len(res.Columns))
-			for i, v := range res.Rows[g.row] {
-				cells[i] = v.Text
+		if g.row < n {
+			cells := make([]string, cols)
+			for c := range cells {
+				cells[c] = set.Cell(g.row, c).Text
 			}
 			return tea.SetClipboard(strings.Join(cells, "\t"))
 		}
 	}
-	g.clamp(res)
+	g.clamp(set)
 	return nil
 }
 
@@ -230,7 +307,7 @@ func (rp *ResultsPane) View(t *tab, spin string, focused bool) string {
 	case r.err != nil:
 		return rp.errorView(r)
 	case r.res.HasRows():
-		return r.grid.render(r.res, rp.width, rp.height, focused)
+		return r.grid.render(r.res.Rows, rp.width, rp.height, focused)
 	case r.res.HasAffected:
 		return rp.center(okStyle.Render("✓ ") + textStyle.Bold(true).Render(plural(r.res.RowsAffected, "row")+" affected") +
 			"\n\n" + mutedStyle.Render(formatDuration(r.res.Duration)))
@@ -243,7 +320,8 @@ func (rp *ResultsPane) center(s string) string {
 	return lipgloss.Place(rp.width, rp.height, lipgloss.Center, lipgloss.Center, s)
 }
 
-// Status summarises the result for the pane's bottom border.
+// Status summarises the result for the pane's bottom border: the row
+// count, live while rows arrive, and why fetching stopped early.
 func (rp *ResultsPane) Status(t *tab, spin string) string {
 	if t == nil || t.run == nil {
 		return ""
@@ -254,14 +332,25 @@ func (rp *ResultsPane) Status(t *tab, spin string) string {
 		return accentStyle.Render(spin) + mutedStyle.Render(" running")
 	case r.err != nil:
 		return errorStyle.Render("✗ failed")
-	case r.res.HasRows():
-		s := okStyle.Render("✓ ") + textStyle.Render(plural(int64(len(r.res.Rows)), "row"))
-		if r.res.Truncated {
-			s += mutedStyle.Render(" (first " + strconv.Itoa(db.RowLimit) + ")")
-		}
-		return s + mutedStyle.Render(" · "+formatDuration(r.res.Duration))
+	case !r.res.HasRows():
+		return okStyle.Render("✓ ") + mutedStyle.Render(formatDuration(r.res.Duration))
 	}
-	return okStyle.Render("✓ ") + mutedStyle.Render(formatDuration(r.res.Duration))
+
+	p := r.res.Rows.Progress()
+	rows := textStyle.Render(plural(int64(p.Rows), "row"))
+	if !p.Done {
+		return accentStyle.Render(spin+" ") + rows + mutedStyle.Render(" · fetching")
+	}
+	s := okStyle.Render("✓ ") + rows
+	switch {
+	case p.Err != nil:
+		s = errorStyle.Render("✗ ") + rows + errorStyle.Render(" · "+firstLine(db.Describe(p.Err).Message))
+	case p.Stopped == db.StopLimit:
+		s += mutedStyle.Render(" · stopped at the " + formatBytes(rp.memoryLimit) + " limit")
+	case p.Stopped == db.StopCancelled:
+		s += mutedStyle.Render(" · stopped")
+	}
+	return s + mutedStyle.Render(" · "+formatDuration(r.res.Duration+p.Elapsed))
 }
 
 // Footer shows the cell position and the current column's type.
@@ -269,17 +358,32 @@ func (rp *ResultsPane) Footer(t *tab, focused bool) string {
 	if t == nil || t.run == nil || t.run.running || t.run.res == nil || !t.run.res.HasRows() {
 		return ""
 	}
-	g, res := &t.run.grid, t.run.res
-	col := res.Columns[g.col]
-	pos := fmt.Sprintf("%d/%d · %s", min(g.row+1, len(res.Rows)), len(res.Rows), col.Name)
+	g, set := &t.run.grid, t.run.res.Rows
+	n := set.Len()
+	col := set.Columns()[g.col]
+	pos := fmt.Sprintf("%s/%s · %s", groupDigits(int64(min(g.row+1, n))), groupDigits(int64(n)), col.Name)
 	if col.Type != "" {
 		pos += " " + strings.ToLower(col.Type)
 	}
 	s := mutedStyle.Render(pos)
-	if focused {
+	switch {
+	case focused && t.run.fetching():
+		s += "  " + hints("esc", "stop")
+	case focused:
 		s += "  " + hints("y", "copy")
 	}
 	return s
+}
+
+// formatBytes renders a size in binary units: 512 MB, 1.5 GB.
+func formatBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return strconv.FormatFloat(float64(n)/(1<<30), 'f', -1, 64) + " GB"
+	case n >= 1<<20:
+		return strconv.FormatInt(n>>20, 10) + " MB"
+	}
+	return strconv.FormatInt(n>>10, 10) + " KB"
 }
 
 func plural(n int64, word string) string {
@@ -398,41 +502,62 @@ type grid struct {
 	row, col  int
 	top, left int
 	widths    []int
+	measured  int // rows the widths are taken from
 }
 
-func (g *grid) clamp(res *db.Result) {
-	g.row = min(max(g.row, 0), max(len(res.Rows)-1, 0))
-	g.col = min(max(g.col, 0), len(res.Columns)-1)
+func (g *grid) clamp(set *db.RowSet) {
+	g.row = min(max(g.row, 0), max(set.Len()-1, 0))
+	g.col = min(max(g.col, 0), len(set.Columns())-1)
 }
 
 func cellText(s string) string {
 	return strings.NewReplacer("\r\n", "↵", "\n", "↵", "\r", "", "\t", " ").Replace(s)
 }
 
-func (g *grid) measure(res *db.Result) {
-	if g.widths != nil {
-		return
+// measureRows is how many leading rows set the initial column widths.
+// Rows further down widen columns when they scroll into view, so values
+// are never cut short just for being deep in a large result.
+const measureRows = 2000
+
+// measure sizes columns from their names and the first rows, as they arrive.
+func (g *grid) measure(set *db.RowSet) {
+	cols := set.Columns()
+	if g.widths == nil {
+		g.widths = make([]int, len(cols))
+		for i, c := range cols {
+			g.widths[i] = min(max(runewidth.StringWidth(c.Name), 1), maxColumnWidth)
+		}
 	}
-	g.widths = make([]int, len(res.Columns))
-	for i, c := range res.Columns {
-		w := runewidth.StringWidth(c.Name)
-		for _, row := range res.Rows {
-			w = max(w, runewidth.StringWidth(cellText(row[i].Text)))
-			if w >= maxColumnWidth {
-				break
+	upTo := min(set.Len(), measureRows)
+	for r := g.measured; r < upTo; r++ {
+		for c := range cols {
+			if g.widths[c] < maxColumnWidth {
+				g.widths[c] = min(max(g.widths[c], runewidth.StringWidth(cellText(set.Cell(r, c).Text))), maxColumnWidth)
 			}
 		}
-		g.widths[i] = min(max(w, 1), maxColumnWidth)
+	}
+	g.measured = max(g.measured, upTo)
+}
+
+// widen grows columns to fit the rows from..to, the ones on screen.
+func (g *grid) widen(set *db.RowSet, from, to int) {
+	for r := max(from, g.measured); r < to; r++ {
+		for c := range g.widths {
+			if g.widths[c] < maxColumnWidth {
+				g.widths[c] = min(max(g.widths[c], runewidth.StringWidth(cellText(set.Cell(r, c).Text))), maxColumnWidth)
+			}
+		}
 	}
 }
 
 const cellGap = 2
 
-func (g *grid) render(res *db.Result, width, height int, focused bool) string {
-	g.measure(res)
-	g.clamp(res)
+func (g *grid) render(set *db.RowSet, width, height int, focused bool) string {
+	g.measure(set)
+	g.clamp(set)
+	columns, n := set.Columns(), set.Len()
 
-	gutterW := len(strconv.Itoa(max(len(res.Rows), 1))) + 1
+	gutterW := len(strconv.Itoa(max(n, 1))) + 1
 	avail := width - gutterW - 1
 	bodyH := max(height-2, 1)
 
@@ -443,6 +568,7 @@ func (g *grid) render(res *db.Result, width, height int, focused bool) string {
 	if g.row >= g.top+bodyH {
 		g.top = g.row - bodyH + 1
 	}
+	g.widen(set, g.top, min(g.top+bodyH, n))
 	// Horizontal scroll: move the first column until the cursor column fits.
 	if g.col < g.left {
 		g.left = g.col
@@ -454,9 +580,13 @@ func (g *grid) render(res *db.Result, width, height int, focused bool) string {
 	// Columns that fit, the last one possibly clipped.
 	var cols []int
 	used := 0
-	for c := g.left; c < len(res.Columns) && used < avail; c++ {
+	for c := g.left; c < len(columns) && used < avail; c++ {
 		cols = append(cols, c)
 		used += g.widths[c] + cellGap
+	}
+	numeric := make([]bool, len(columns))
+	for _, c := range cols {
+		numeric[c] = set.Numeric(c)
 	}
 
 	plain := lipgloss.NewStyle()
@@ -470,7 +600,7 @@ func (g *grid) render(res *db.Result, width, height int, focused bool) string {
 		if c == g.col {
 			st = accentStyle.Bold(true)
 		}
-		h.WriteString(st.Render(pad(res.Columns[c].Name, g.widths[c], res.Columns[c].Numeric)))
+		h.WriteString(st.Render(pad(columns[c].Name, g.widths[c], numeric[c])))
 		h.WriteString(strings.Repeat(" ", cellGap))
 	}
 	out = append(out, fit(h.String(), width, plain))
@@ -478,15 +608,19 @@ func (g *grid) render(res *db.Result, width, height int, focused bool) string {
 	if g.left > 0 {
 		rule = "‹" + rule[len("─"):]
 	}
-	if len(cols) > 0 && (cols[len(cols)-1] < len(res.Columns)-1 || used-cellGap > avail) {
+	if len(cols) > 0 && (cols[len(cols)-1] < len(columns)-1 || used-cellGap > avail) {
 		rule = strings.TrimSuffix(rule, "─") + "›"
 	}
 	out = append(out, borderStyle.Render(rule))
 
-	if len(res.Rows) == 0 {
-		out = append(out, strings.Repeat(" ", gutterW+1)+mutedStyle.Italic(true).Render("no rows"))
+	if n == 0 {
+		note := "no rows"
+		if !set.Progress().Done {
+			note = "waiting for rows…"
+		}
+		out = append(out, strings.Repeat(" ", gutterW+1)+mutedStyle.Italic(true).Render(note))
 	}
-	for r := g.top; r < min(g.top+bodyH, len(res.Rows)); r++ {
+	for r := g.top; r < min(g.top+bodyH, n); r++ {
 		current := r == g.row
 		bg := func(s lipgloss.Style) lipgloss.Style {
 			if current && focused {
@@ -501,7 +635,7 @@ func (g *grid) render(res *db.Result, width, height int, focused bool) string {
 		}
 		b.WriteString(bg(num).Render(fmt.Sprintf("%*d", gutterW, r+1)) + bg(plain).Render(" "))
 		for _, c := range cols {
-			v := res.Rows[r][c]
+			v := set.Cell(r, c)
 			st := textStyle
 			if v.Null {
 				st = mutedStyle.Italic(true)
@@ -510,7 +644,7 @@ func (g *grid) render(res *db.Result, width, height int, focused bool) string {
 			if current && c == g.col && focused {
 				st = st.Background(colorBorder).Bold(true)
 			}
-			b.WriteString(st.Render(pad(cellText(v.Text), g.widths[c], res.Columns[c].Numeric)))
+			b.WriteString(st.Render(pad(cellText(v.Text), g.widths[c], numeric[c])))
 			b.WriteString(bg(plain).Render(strings.Repeat(" ", cellGap)))
 		}
 		out = append(out, fit(b.String(), width, bg(plain)))

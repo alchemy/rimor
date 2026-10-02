@@ -86,7 +86,9 @@ func (p *Pool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for s := range p.sessions {
-		s.Close()
+		// Closing waits for the session's open rows; the UI stops fetches
+		// first, but never block on one that is still winding down.
+		go s.Close()
 		delete(p.sessions, s)
 	}
 	for name, conn := range p.dbs {

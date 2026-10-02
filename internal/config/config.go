@@ -26,6 +26,9 @@ type Settings struct {
 	// Leader is pressed before a second key, as an alternative to the alt
 	// shortcuts for terminals that keep alt for themselves.
 	Leader string `toml:"leader"`
+	// ResultMemoryMB caps the memory a result's rows take; fetching stops
+	// there, keeping the rows so far.
+	ResultMemoryMB int `toml:"result_memory_mb"`
 	// Keys replaces the bindings of the named actions.
 	Keys map[string][]string `toml:"keys"`
 }
@@ -62,7 +65,7 @@ var Actions = []Action{
 
 // Defaults are the settings used for anything config.toml leaves out.
 func Defaults() Settings {
-	return Settings{Icons: IconsAuto, Leader: "ctrl+g"}
+	return Settings{Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512}
 }
 
 // Bindings returns the keys of every action: the defaults, replaced by
@@ -107,6 +110,9 @@ func (s Settings) validate() error {
 	case IconsAuto, IconsNerd, IconsPlain:
 	default:
 		return fmt.Errorf("icons must be %q, %q or %q, not %q", IconsAuto, IconsNerd, IconsPlain, s.Icons)
+	}
+	if s.ResultMemoryMB < 1 {
+		return fmt.Errorf("result_memory_mb must be at least 1, not %d", s.ResultMemoryMB)
 	}
 	if strings.TrimSpace(s.Leader) == "" || strings.Contains(s.Leader, " ") {
 		return fmt.Errorf("leader must be a single key such as \"ctrl+g\", not %q", s.Leader)
@@ -175,6 +181,10 @@ func Template() string {
 # Press it to see the keys it offers.
 `)
 	fmt.Fprintf(&b, "# leader = %q\n\n", d.Leader)
+	b.WriteString(`# Memory a query's rows may take, in MB. Rows arrive in the background
+# and fetching stops at this limit, keeping what arrived; esc stops sooner.
+`)
+	fmt.Fprintf(&b, "# result_memory_mb = %d\n\n", d.ResultMemoryMB)
 	b.WriteString(`# App-wide shortcuts. Binding an action replaces all of its default keys.
 # "leader x" means the leader key, then x. Keys inside panes (the editor,
 # the explorer, the results grid) are not remappable yet.

@@ -135,6 +135,7 @@ type QueryPane struct {
 	notice        string // shown in the footer until the next key
 	spinner       spinner.Model
 	runKey        string // the run key for hints, as the terminal reports it
+	memoryLimit   int64  // bytes a result's rows may take
 }
 
 func (q *QueryPane) current() *tab {
@@ -272,6 +273,16 @@ func absPath(path string) string {
 	return path
 }
 
+// StopConnection stops the statements and fetches running on a
+// connection, before it is closed: closing a session waits for its rows.
+func (q *QueryPane) StopConnection(conn *connection) {
+	for _, t := range q.tabs {
+		if t.sessionCtx.conn == conn {
+			t.cancelRun()
+		}
+	}
+}
+
 // ForgetConnection clears the context of tabs that used a deleted
 // connection.
 func (q *QueryPane) ForgetConnection(conn *connection) {
@@ -285,8 +296,9 @@ func (q *QueryPane) ForgetConnection(conn *connection) {
 func (q *QueryPane) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case runDoneMsg:
-		q.finish(msg)
-		return nil
+		return q.finish(msg)
+	case rowsMsg:
+		return q.rowsArrived(msg)
 	case spinner.TickMsg:
 		if q.running() > 0 {
 			var cmd tea.Cmd

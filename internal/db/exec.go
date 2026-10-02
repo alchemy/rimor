@@ -18,8 +18,9 @@ import (
 	mssql "github.com/microsoft/go-mssqldb"
 )
 
-// RowLimit caps how many rows a result keeps.
-const RowLimit = 1000
+// DefaultMemoryLimit is how much memory a result's rows may take before
+// fetching stops.
+const DefaultMemoryLimit = 512 << 20
 
 // Session returns a dedicated connection to a database, so that session
 // state (USE, SET, temp tables, open transactions) carries over between
@@ -56,11 +57,10 @@ func IsConnLost(err error) bool {
 		(err != nil && strings.Contains(err.Error(), "database is closed"))
 }
 
-// Column describes a result column.
+// Column describes a result column; see RowSet.Numeric for alignment.
 type Column struct {
-	Name    string
-	Type    string // database type name, e.g. VARCHAR
-	Numeric bool   // values align right
+	Name string
+	Type string // database type name, e.g. VARCHAR
 }
 
 // Value is a formatted cell.
@@ -71,21 +71,32 @@ type Value struct {
 
 // Result is the outcome of one statement.
 type Result struct {
-	Columns []Column
-	Rows    [][]Value
-	// Truncated is set when the statement returned more than RowLimit rows.
-	Truncated bool
+	// Rows is the result set, still being fetched; nil for statements that
+	// do not return rows.
+	Rows *RowSet
 
 	// RowsAffected is set for statements that do not return rows, when the
 	// driver reports it.
 	RowsAffected int64
 	HasAffected  bool
 
+	// Duration is the time until the statement returned: its first rows,
+	// for queries.
 	Duration time.Duration
 }
 
 // HasRows reports whether the statement produced a result set.
-func (r *Result) HasRows() bool { return len(r.Columns) > 0 }
+func (r *Result) HasRows() bool { return r.Rows != nil }
+
+// RunOptions control a statement's execution.
+type RunOptions struct {
+	// MemoryLimit stops fetching once the rows take this many bytes;
+	// zero means DefaultMemoryLimit.
+	MemoryLimit int64
+	// Cancel cancels the context passed to Run. Fetching outlives Run, so
+	// it is called when fetching ends, and RowSet.Stop calls it.
+	Cancel context.CancelFunc
+}
 
 // rowKeywords start statements that return rows.
 var rowKeywords = map[string]bool{
@@ -134,13 +145,22 @@ func firstWord(s string) string {
 }
 
 // Run executes one statement (or, where the driver allows, one batch) on a
-// session connection.
-func Run(ctx context.Context, conn *sql.Conn, query string) (*Result, error) {
+// session connection. A query returns as soon as its columns are known;
+// its rows keep arriving in Result.Rows, and the session stays busy until
+// fetching ends.
+func Run(ctx context.Context, conn *sql.Conn, query string, opts RunOptions) (*Result, error) {
+	if opts.MemoryLimit <= 0 {
+		opts.MemoryLimit = DefaultMemoryLimit
+	}
+	if opts.Cancel == nil {
+		opts.Cancel = func() {}
+	}
+
 	start := time.Now()
 	res := &Result{}
 	var err error
 	if returnsRows(query) {
-		err = runQuery(ctx, conn, query, res)
+		res.Rows, err = startQuery(ctx, conn, query, opts)
 	} else {
 		var r sql.Result
 		if r, err = conn.ExecContext(ctx, query); err == nil {
@@ -150,71 +170,45 @@ func Run(ctx context.Context, conn *sql.Conn, query string) (*Result, error) {
 		}
 	}
 	res.Duration = time.Since(start)
+	if res.Rows == nil {
+		opts.Cancel() // nothing left running
+	}
 	return res, err
 }
 
-func runQuery(ctx context.Context, conn *sql.Conn, query string, res *Result) error {
+// startQuery runs a query and starts fetching its first result set with
+// columns; batches may start with row counts from SET or DML statements.
+func startQuery(ctx context.Context, conn *sql.Conn, query string, opts RunOptions) (*RowSet, error) {
 	rows, err := conn.QueryContext(ctx, query)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer rows.Close()
-
-	// The first result set with columns is shown; batches may start with
-	// row counts from SET or DML statements.
 	for {
-		cols, err := rows.ColumnTypes()
+		types, err := rows.ColumnTypes()
 		if err != nil {
-			return err
+			rows.Close()
+			return nil, err
 		}
-		if len(cols) > 0 {
-			return readRows(rows, cols, res)
+		if len(types) > 0 {
+			set := &RowSet{
+				columns: make([]Column, len(types)),
+				numeric: make([]bool, len(types)),
+				seen:    make([]bool, len(types)),
+				updated: make(chan struct{}, 1),
+				cancel:  opts.Cancel,
+			}
+			for i, t := range types {
+				set.columns[i] = Column{Name: t.Name(), Type: t.DatabaseTypeName()}
+			}
+			go set.fetch(ctx, rows, opts.MemoryLimit, opts.Cancel)
+			return set, nil
 		}
 		if !rows.NextResultSet() {
-			return rows.Err()
+			err := rows.Err()
+			rows.Close()
+			return nil, err
 		}
 	}
-}
-
-func readRows(rows *sql.Rows, cols []*sql.ColumnType, res *Result) error {
-	res.Columns = make([]Column, len(cols))
-	numeric := make([]bool, len(cols)) // every non-null value was a number
-	for i, c := range cols {
-		res.Columns[i] = Column{Name: c.Name(), Type: c.DatabaseTypeName()}
-		numeric[i] = true
-	}
-
-	raw := make([]any, len(cols))
-	ptrs := make([]any, len(cols))
-	for i := range raw {
-		ptrs[i] = &raw[i]
-	}
-	for rows.Next() {
-		if len(res.Rows) == RowLimit {
-			res.Truncated = true
-			break
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			return err
-		}
-		row := make([]Value, len(cols))
-		for i, v := range raw {
-			row[i] = formatValue(v, res.Columns[i].Type)
-			switch v.(type) {
-			case nil, int64, int32, int, float64, float32:
-			default:
-				numeric[i] = false
-			}
-		}
-		res.Rows = append(res.Rows, row)
-	}
-	for i := range res.Columns {
-		res.Columns[i].Numeric = numericType(res.Columns[i].Type) || (numeric[i] && len(res.Rows) > 0)
-	}
-	if res.Truncated {
-		return nil // rows.Close discards the rest
-	}
-	return rows.Err()
 }
 
 func numericType(name string) bool {

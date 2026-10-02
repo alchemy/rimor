@@ -69,6 +69,8 @@ func New(store db.Store, sessionPath string, settings config.Settings) Model {
 		split:       defaultLayout(),
 	}
 	m.updateRunHint()
+	limit := int64(settings.ResultMemoryMB) << 20
+	m.query.memoryLimit, m.results.memoryLimit = limit, limit
 	m.query.spinner = spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle()))
 	if sessionPath != "" {
 		s, err := loadSession(sessionPath)
@@ -160,11 +162,15 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case saveConnectionMsg:
 		m.modal = nil
+		if msg.conn != nil {
+			m.query.StopConnection(msg.conn) // editing closes its sessions
+		}
 		m.explorer.Upsert(msg.conn, msg.cfg)
 		m.setFocus(focusExplorer)
 		return nil
 	case deleteConnectionMsg:
 		m.modal = nil
+		m.query.StopConnection(msg.conn)
 		m.explorer.Remove(msg.conn)
 		m.query.ForgetConnection(msg.conn)
 		m.saveSession()
@@ -204,8 +210,12 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.saveSession()
 		return nil
 
-	case runDoneMsg:
+	case runDoneMsg, rowsMsg:
 		return m.query.Update(msg)
+	case disconnectMsg:
+		m.query.StopConnection(msg.conn)
+		m.explorer.disconnect(msg.conn)
+		return nil
 	case tea.KeyboardEnhancementsMsg:
 		m.disambiguated = msg.SupportsKeyDisambiguation()
 		m.updateRunHint()

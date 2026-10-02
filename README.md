@@ -47,8 +47,12 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
 - **Editor.** Syntax highlighting for each dialect (PostgreSQL, T-SQL,
   SQLite), selection, undo/redo, clipboard, and indentation that follows
   the previous line.
-- **Results.** A grid that scrolls vertically by row and horizontally by
-  column, with right-aligned numbers and visible `NULL`s. Statements that
+- **Results.** Rows stream in the background: the first ones show within
+  milliseconds while the rest arrive, with a live count, and `esc` stops
+  fetching but keeps what came. They are stored compactly (a few bytes of
+  overhead per cell), so millions of rows are fine. The grid scrolls
+  vertically by row and horizontally by column, with right-aligned numbers
+  and visible `NULL`s. Statements that
   change data show the rows affected. Errors show the database's code and
   message, plus the failing line with a caret where the driver reports a
   position.
@@ -128,7 +132,7 @@ disconnects, `.` shows or hides a database's empty schemas.
 `ctrl+pgup/pgdn` or `alt+[`/`alt+]` switch tabs, `ctrl+e` changes the context,
 `esc` cancels a running query.
 
-**Results:** the arrows or `hjkl` move, `pgup`/`pgdn` page, `g`/`G` jump to the
+**Results:** `esc` stops fetching, the arrows or `hjkl` move, `pgup`/`pgdn` page, `g`/`G` jump to the
 first or last row, `home`/`end` to the first or last column, `y` copies the
 cell, `Y` copies the row.
 
@@ -163,8 +167,9 @@ On first run rimor creates its configuration folder:
 uncomment a line to change it:
 
 ```toml
-icons = "plain"     # "auto", "nerd" or "plain"
+icons = "plain"         # "auto", "nerd" or "plain"
 leader = "ctrl+b"
+result_memory_mb = 2048 # memory a query's rows may take
 
 [keys]
 full_screen = ["alt+z", "leader z"]   # replaces alt+f and leader f
@@ -183,7 +188,9 @@ results) are not remappable yet.
 - On PostgreSQL a row-returning query must be a single statement; select it
   to run one of several. SQL Server batches work, and the first result set
   with columns is shown.
-- Results stop at 1,000 rows.
+- A result's rows stay in memory, up to `result_memory_mb` (512 MB by
+  default); fetching stops there and keeps what arrived. Spilling larger
+  results to disk is planned.
 - A schema counts as empty when the login sees no objects, user types or XML
   schema collections in it, so a schema whose objects you lack permission
   to see is hidden too. The note under the database says how many are
