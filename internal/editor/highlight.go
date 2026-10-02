@@ -31,6 +31,10 @@ type Theme struct {
 	Comment, Operator, Punctuation, Variable, Quoted color.Color
 
 	LineNumber, CurrentLineNumber, Selection, Placeholder color.Color
+
+	// ReverseSelection shows the selection in reverse video instead of the
+	// Selection background, for terminals without colour.
+	ReverseSelection bool
 }
 
 func (t Theme) color(c class) color.Color {

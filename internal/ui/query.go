@@ -45,29 +45,11 @@ func (c queryContext) render() string {
 	}
 	cfg := c.conn.cfg()
 	ic := driverIcon(cfg.Driver)
-	s := lipgloss.NewStyle().Foreground(ic.color).Render(ic.String()) + " " + textStyle.Render(cfg.Name)
+	s := lipgloss.NewStyle().Foreground(*ic.color).Render(ic.String()) + " " + textStyle.Render(cfg.Name)
 	if c.database != "" {
 		s += mutedStyle.Render(" › ") + textStyle.Render(c.database)
 	}
 	return s
-}
-
-var editorTheme = editor.Theme{
-	Text:              colorText,
-	Keyword:           colorAccent,
-	Type:              colorYellow,
-	Function:          colorBlue,
-	String:            colorGreen,
-	Number:            colorPeach,
-	Comment:           colorMuted,
-	Operator:          lipgloss.Color("#89dceb"), // sky
-	Punctuation:       colorOverlay,
-	Variable:          lipgloss.Color("#eba0ac"), // maroon
-	Quoted:            lipgloss.Color("#f5e0dc"), // rosewater
-	LineNumber:        lipgloss.Color("#585b70"), // surface2
-	CurrentLineNumber: colorAccent,
-	Selection:         colorBorder,
-	Placeholder:       colorMuted,
 }
 
 type tab struct {
@@ -93,6 +75,13 @@ func (t *tab) title() string {
 }
 
 func (t *tab) dirty() bool { return t.ed.Version() != t.saved }
+
+// SetTheme recolours the open editors after a theme change.
+func (q *QueryPane) SetTheme(theme editor.Theme) {
+	for _, t := range q.tabs {
+		t.ed.SetTheme(theme)
+	}
+}
 
 func (t *tab) setContext(ctx queryContext) {
 	if ctx == t.ctx {
@@ -388,7 +377,7 @@ func (q *QueryPane) Tabs(width int, focused bool) string {
 	for i, t := range q.tabs {
 		dot := mutedStyle.Render("○")
 		if t.ctx.conn != nil {
-			dot = lipgloss.NewStyle().Foreground(driverColor(t.ctx.conn.cfg().Driver)).Render("●")
+			dot = lipgloss.NewStyle().Foreground(*driverColor(t.ctx.conn.cfg().Driver)).Render("●")
 		}
 		name := mutedStyle.Render(t.title())
 		if i == q.active {

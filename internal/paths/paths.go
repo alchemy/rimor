@@ -52,3 +52,17 @@ func Home() string {
 	}
 	return home
 }
+
+// Omarchy reports whether this is an Omarchy desktop
+// (https://omarchy.org): its session sets $OMARCHY_PATH, and installs live
+// under ~/.local/share/omarchy.
+func Omarchy() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	if os.Getenv("OMARCHY_PATH") != "" {
+		return true
+	}
+	info, err := os.Stat(filepath.Join(Home(), ".local", "share", "omarchy"))
+	return err == nil && info.IsDir()
+}

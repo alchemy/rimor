@@ -92,9 +92,11 @@ func hasNerdFont(dir string, depth int) bool {
 	return false
 }
 
+// icon is a glyph and its colour. The colour points at a theme variable,
+// so icons follow theme changes.
 type icon struct {
 	nerd, plain string
-	color       color.Color
+	color       *color.Color
 }
 
 func (i icon) String() string {
@@ -105,22 +107,22 @@ func (i icon) String() string {
 }
 
 var (
-	iconAdd        = icon{"", "+", colorAccent}
-	iconServer     = icon{"\uf233", "◉", colorBlue}
-	iconDatabase   = icon{"\uf1c0", "◈", colorBlue}
-	iconSchema     = icon{"", "◇", colorLavender}
-	iconFolder     = icon{"", "▪", colorOverlay}
-	iconFolderOpen = icon{"", "▫", colorOverlay}
-	iconTable      = icon{"", "▦", colorBlue}
-	iconView       = icon{"", "◎", colorTeal}
-	iconMatView    = icon{"", "◍", colorSapphire}
-	iconFunction   = icon{"", "ƒ", colorPeach}
-	iconProcedure  = icon{"", "⚙", colorPeach}
-	iconSequence   = icon{"", "#", colorPink}
-	iconIndex      = icon{"", "≡", colorLavender}
-	iconTrigger    = icon{"", "↯", colorYellow}
-	iconColumn     = icon{"", "·", colorTitle}
-	iconKey        = icon{"", "⚷", colorYellow}
+	iconAdd        = icon{"", "+", &colorAccent}
+	iconServer     = icon{"\uf233", "◉", &colorBlue}
+	iconDatabase   = icon{"\uf1c0", "◈", &colorBlue}
+	iconSchema     = icon{"", "◇", &colorLavender}
+	iconFolder     = icon{"", "▪", &colorOverlay}
+	iconFolderOpen = icon{"", "▫", &colorOverlay}
+	iconTable      = icon{"", "▦", &colorBlue}
+	iconView       = icon{"", "◎", &colorTeal}
+	iconMatView    = icon{"", "◍", &colorSapphire}
+	iconFunction   = icon{"", "ƒ", &colorPeach}
+	iconProcedure  = icon{"", "⚙", &colorPeach}
+	iconSequence   = icon{"", "#", &colorPink}
+	iconIndex      = icon{"", "≡", &colorLavender}
+	iconTrigger    = icon{"", "↯", &colorYellow}
+	iconColumn     = icon{"", "·", &colorTitle}
+	iconKey        = icon{"", "⚷", &colorYellow}
 )
 
 // driverIcon is a server for engines with several databases and a database
@@ -134,16 +136,16 @@ func driverIcon(d db.Driver) icon {
 	return i
 }
 
-func driverColor(d db.Driver) color.Color {
+func driverColor(d db.Driver) *color.Color {
 	switch d {
 	case db.Postgres:
-		return colorBlue
+		return &colorBlue
 	case db.SQLite:
-		return colorTeal
+		return &colorTeal
 	case db.SQLServer:
-		return colorPeach
+		return &colorPeach
 	}
-	return colorTitle
+	return &colorTitle
 }
 
 func objectIcon(o db.Object, expanded bool) icon {
@@ -155,7 +157,7 @@ func objectIcon(o db.Object, expanded bool) icon {
 		return iconFolder
 	case db.KindDatabase:
 		i := iconDatabase
-		i.color = colorLavender
+		i.color = &colorLavender
 		return i
 	case db.KindSchema:
 		return iconSchema

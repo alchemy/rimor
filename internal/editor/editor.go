@@ -71,8 +71,14 @@ func New(theme Theme) *Model {
 		goal:           -1,
 		lexer:          lexerFor(SQL),
 		classesVersion: -1,
-		theme:          theme,
 	}
+	m.SetTheme(theme)
+	return m
+}
+
+// SetTheme changes the colours.
+func (m *Model) SetTheme(theme Theme) {
+	m.theme = theme
 	for c := range classCount {
 		base := lipgloss.NewStyle()
 		if col := theme.color(c); col != nil {
@@ -83,11 +89,13 @@ func New(theme Theme) *Model {
 		}
 		m.styles[c][0] = base
 		m.styles[c][1] = base.Background(theme.Selection)
+		if theme.ReverseSelection {
+			m.styles[c][1] = base.Reverse(true)
+		}
 	}
 	m.gutter[0] = lipgloss.NewStyle().Foreground(theme.LineNumber)
 	m.gutter[1] = lipgloss.NewStyle().Foreground(theme.CurrentLineNumber).Bold(true)
 	m.muted = lipgloss.NewStyle().Foreground(theme.Placeholder).Italic(true)
-	return m
 }
 
 // SetLanguage picks the SQL dialect used for highlighting.

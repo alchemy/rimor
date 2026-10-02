@@ -46,6 +46,10 @@ type Model struct {
 	leader       bool // the leader key was pressed; the next key picks an action
 	leaderRepeat bool // a resize step ran; further steps need no new leader
 
+	// theme is the resolved theme setting; the palette may still adapt to
+	// the terminal's background when it reports it.
+	theme themeChoice
+
 	// disambiguated is set once the terminal confirms the kitty keyboard
 	// protocol, so keys such as ctrl+enter can be told apart and shown in
 	// hints; until then hints use keys every terminal reports.
@@ -54,6 +58,8 @@ type Model struct {
 
 // New builds the UI from settings, saved connections and the last session.
 func New(store db.Store, sessionPath string, settings config.Settings) Model {
+	theme := chooseTheme(settings.Theme)
+	applyPalette(theme.palette)
 	setIcons(settings.Icons)
 	keys := newKeymap(settings)
 	m := Model{
@@ -64,6 +70,7 @@ func New(store db.Store, sessionPath string, settings config.Settings) Model {
 				footer: hints(shortKey(keys.leader), "keys", shortKey(keys.first("quit", false)), "quit")},
 		},
 		keys:        keys,
+		theme:       theme,
 		explorer:    NewExplorer(store),
 		sessionPath: sessionPath,
 		split:       defaultLayout(),
@@ -102,7 +109,9 @@ func (m Model) saveSession() {
 	}
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+// Init asks the terminal for its background colour, which "auto" uses to
+// choose dark or light and the terminal theme to shade the selection.
+func (m Model) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 // setFocus moves the focus. In full screen the newly focused pane takes
 // over the screen.
@@ -215,6 +224,12 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case disconnectMsg:
 		m.query.StopConnection(msg.conn)
 		m.explorer.disconnect(msg.conn)
+		return nil
+	case tea.BackgroundColorMsg:
+		if p := m.theme.forBackground(msg.Color, msg.IsDark()); p != current {
+			applyPalette(p)
+			m.query.SetTheme(editorTheme)
+		}
 		return nil
 	case tea.KeyboardEnhancementsMsg:
 		m.disambiguated = msg.SupportsKeyDisambiguation()

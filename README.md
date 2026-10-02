@@ -82,6 +82,20 @@ go build ./cmd/rimor
 ./rimor
 ```
 
+## Themes
+
+`theme` in `config.toml` picks the colours:
+
+| Theme | |
+|---|---|
+| `auto` (default) | On Omarchy, `terminal`, so rimor follows the system theme. Elsewhere `dark` or `light`, matching the background the terminal reports |
+| `dark` | Catppuccin Mocha |
+| `light` | Catppuccin Latte |
+| `terminal` | The terminal's own 16 colours; the cursor row and selection are shaded from its background |
+
+rimor never paints the terminal's background. Setting `NO_COLOR` turns colours
+off, with the cursor row and selection in reverse video.
+
 The Nerd Font icons appear automatically when your terminal bundles them
 (kitty, Ghostty, WezTerm) or a Nerd Font is installed; otherwise rimor uses
 plain Unicode symbols. See `icons` in [Configuration](#configuration).
@@ -167,6 +181,7 @@ On first run rimor creates its configuration folder:
 uncomment a line to change it:
 
 ```toml
+theme = "light"         # "auto", "dark", "light" or "terminal"
 icons = "plain"         # "auto", "nerd" or "plain"
 leader = "ctrl+b"
 result_memory_mb = 2048 # memory a query's rows may take

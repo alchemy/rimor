@@ -20,8 +20,17 @@ const (
 	IconsPlain = "plain" // Unicode symbols that every font has
 )
 
+// Themes.
+const (
+	ThemeAuto     = "auto"     // the terminal's colours on Omarchy, else dark or light by background
+	ThemeDark     = "dark"     // Catppuccin Mocha
+	ThemeLight    = "light"    // Catppuccin Latte
+	ThemeTerminal = "terminal" // the terminal's 16 ANSI colours
+)
+
 // Settings is the content of config.toml.
 type Settings struct {
+	Theme string `toml:"theme"`
 	Icons string `toml:"icons"`
 	// Leader is pressed before a second key, as an alternative to the alt
 	// shortcuts for terminals that keep alt for themselves.
@@ -65,7 +74,7 @@ var Actions = []Action{
 
 // Defaults are the settings used for anything config.toml leaves out.
 func Defaults() Settings {
-	return Settings{Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512}
+	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512}
 }
 
 // Bindings returns the keys of every action: the defaults, replaced by
@@ -106,6 +115,11 @@ func Load(path string) (Settings, error) {
 }
 
 func (s Settings) validate() error {
+	switch s.Theme {
+	case ThemeAuto, ThemeDark, ThemeLight, ThemeTerminal:
+	default:
+		return fmt.Errorf("theme must be %q, %q, %q or %q, not %q", ThemeAuto, ThemeDark, ThemeLight, ThemeTerminal, s.Theme)
+	}
 	switch s.Icons {
 	case IconsAuto, IconsNerd, IconsPlain:
 	default:
@@ -168,7 +182,16 @@ func Template() string {
 	b.WriteString(`# rimor settings. Lines starting with # show the defaults; remove the #
 # and change the value to override one.
 
-# Icons in the explorer and tabs:
+# Colour theme:
+#   "auto"     on Omarchy, "terminal", so rimor follows the system theme;
+#              elsewhere "dark" or "light" to match the terminal's background
+#   "dark"     Catppuccin Mocha
+#   "light"    Catppuccin Latte
+#   "terminal" the terminal's own 16 colours
+# Setting NO_COLOR in the environment turns colours off whatever this says.
+`)
+	fmt.Fprintf(&b, "# theme = %q\n\n", d.Theme)
+	b.WriteString(`# Icons in the explorer and tabs:
 #   "auto"  Nerd Font glyphs when the terminal or system likely has a Nerd
 #           Font (kitty, Ghostty and WezTerm bundle one), otherwise plain
 #   "nerd"  always Nerd Font glyphs

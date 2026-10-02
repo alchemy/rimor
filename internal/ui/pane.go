@@ -33,8 +33,6 @@ type pane struct {
 	corner string
 }
 
-var handleStyle = lipgloss.NewStyle().Foreground(colorLavender)
-
 // render draws the pane at exactly width×height cells.
 func (p pane) render(body string, width, height int, focused bool) string {
 	if width < 2 || height < 2 {

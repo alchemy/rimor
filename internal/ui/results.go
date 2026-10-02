@@ -624,7 +624,7 @@ func (g *grid) render(set *db.RowSet, width, height int, focused bool) string {
 		current := r == g.row
 		bg := func(s lipgloss.Style) lipgloss.Style {
 			if current && focused {
-				return s.Background(colorCursor)
+				return onCursor(s)
 			}
 			return s
 		}
@@ -642,7 +642,7 @@ func (g *grid) render(set *db.RowSet, width, height int, focused bool) string {
 			}
 			st = bg(st)
 			if current && c == g.col && focused {
-				st = st.Background(colorBorder).Bold(true)
+				st = onSelection(st).Bold(true)
 			}
 			b.WriteString(st.Render(pad(cellText(v.Text), g.widths[c], numeric[c])))
 			b.WriteString(bg(plain).Render(strings.Repeat(" ", cellGap)))

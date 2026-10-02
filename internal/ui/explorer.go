@@ -635,7 +635,7 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 	selected := current && focused
 	st := func(s lipgloss.Style) lipgloss.Style {
 		if selected {
-			return s.Background(colorCursor)
+			return onCursor(s)
 		}
 		return s
 	}
@@ -675,7 +675,7 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 			cfg := n.conn.cfg()
 			ic = driverIcon(cfg.Driver)
 			if !n.conn.pool.Connected() {
-				ic.color = colorMuted // dim until connected
+				ic.color = &colorMuted // dim until connected
 			}
 			name, detail = cfg.Name, cfg.Driver.Short()
 			nameStyle = nameStyle.Bold(true)
@@ -697,7 +697,7 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 			nameStyle = nameStyle.Foreground(colorAccent)
 		}
 
-		s = indent + chevron + gap + st(lipgloss.NewStyle().Foreground(ic.color)).Render(ic.String()) + gap +
+		s = indent + chevron + gap + st(lipgloss.NewStyle().Foreground(*ic.color)).Render(ic.String()) + gap +
 			st(nameStyle).Render(name)
 		if detail != "" {
 			s += st(plain).Render("  ") + st(mutedStyle).Render(detail)
