@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Format
+        if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      # Database server tests skip unless RIMOR_TEST_POSTGRES or
+      # RIMOR_TEST_SQLSERVER is set; SQLite tests always run.
+      - run: go test ./...
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build ${{ matrix.target }}
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          # Passed through the environment rather than spliced into the script.
+          TARGET: ${{ matrix.target }}
+        run: GOOS=${TARGET%/*} GOARCH=${TARGET#*/} go build -o /dev/null ./cmd/rimor

@@ -1,0 +1,3 @@
+# Binaries from go build ./cmd/rimor
+/rimor
+/rimor.exe
