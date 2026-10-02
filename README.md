@@ -210,3 +210,7 @@ tables.
 | `internal/db` | connections, catalog queries per driver, execution |
 | `internal/config` | `config.toml` and the bindable actions |
 | `internal/paths` | where files live on each platform |
+
+## License
+
+[MIT](LICENSE)
