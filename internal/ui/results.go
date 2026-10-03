@@ -530,7 +530,7 @@ func (g *grid) clamp(set *db.RowSet) {
 }
 
 func cellText(s string) string {
-	return strings.NewReplacer("\r\n", "↵", "\n", "↵", "\r", "", "\t", " ").Replace(s)
+	return strings.NewReplacer("\r\n", "⏎", "\n", "⏎", "\r", "", "\t", " ").Replace(s)
 }
 
 // measureRows is how many leading rows set the initial column widths.

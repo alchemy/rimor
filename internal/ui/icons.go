@@ -106,6 +106,9 @@ func (i icon) String() string {
 	return i.plain
 }
 
+// The plain glyphs are all in JetBrains Mono, so in a terminal (or on the
+// web page) using it none falls back to another font, whose width may not
+// match the cell.
 var (
 	iconAdd        = icon{"", "+", &colorAccent}
 	iconServer     = icon{"\uf233", "◉", &colorBlue}
@@ -113,16 +116,16 @@ var (
 	iconSchema     = icon{"", "◇", &colorLavender}
 	iconFolder     = icon{"", "▪", &colorOverlay}
 	iconFolderOpen = icon{"", "▫", &colorOverlay}
-	iconTable      = icon{"", "▦", &colorBlue}
+	iconTable      = icon{"", "◫", &colorBlue}
 	iconView       = icon{"", "◎", &colorTeal}
-	iconMatView    = icon{"", "◍", &colorSapphire}
+	iconMatView    = icon{"", "⊙", &colorSapphire}
 	iconFunction   = icon{"", "ƒ", &colorPeach}
-	iconProcedure  = icon{"", "⚙", &colorPeach}
+	iconProcedure  = icon{"", "§", &colorPeach}
 	iconSequence   = icon{"", "#", &colorPink}
 	iconIndex      = icon{"", "≡", &colorLavender}
-	iconTrigger    = icon{"", "↯", &colorYellow}
+	iconTrigger    = icon{"", "↝", &colorYellow}
 	iconColumn     = icon{"", "·", &colorTitle}
-	iconKey        = icon{"", "⚷", &colorYellow}
+	iconKey        = icon{"", "◆", &colorYellow}
 )
 
 // driverIcon is a server for engines with several databases and a database
