@@ -96,6 +96,9 @@ type RunOptions struct {
 	// Cancel cancels the context passed to Run. Fetching outlives Run, so
 	// it is called when fetching ends, and RowSet.Stop calls it.
 	Cancel context.CancelFunc
+	// CheckReadOnly refuses statements that may write (see CheckReadOnly),
+	// for read-only connections whose database cannot enforce it.
+	CheckReadOnly bool
 }
 
 // rowKeywords start statements that return rows.
@@ -154,6 +157,12 @@ func Run(ctx context.Context, conn *sql.Conn, query string, opts RunOptions) (*R
 	}
 	if opts.Cancel == nil {
 		opts.Cancel = func() {}
+	}
+	if opts.CheckReadOnly {
+		if err := CheckReadOnly(query); err != nil {
+			opts.Cancel()
+			return nil, err
+		}
 	}
 
 	start := time.Now()

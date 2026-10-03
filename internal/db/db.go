@@ -84,6 +84,11 @@ type Config struct {
 	Name   string `json:"name"`
 	Driver Driver `json:"driver"`
 	DSN    string `json:"dsn"`
+	// ReadOnly refuses writes: enforced by the server on PostgreSQL
+	// (default_transaction_read_only) and by the engine on SQLite
+	// (query_only); on SQL Server, which has no such session setting,
+	// rimor refuses statements that write (see CheckReadOnly).
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 // HasDatabases reports whether one connection reaches several databases.
@@ -108,13 +113,21 @@ func OpenDatabase(ctx context.Context, cfg Config, database string) (*sql.DB, er
 		} else if err != nil {
 			return nil, err
 		}
+		if cfg.ReadOnly {
+			dsn += "?_pragma=query_only(1)" // applied to every connection
+		}
 	case Postgres:
-		if database != "" {
+		if database != "" || cfg.ReadOnly {
 			pc, err := pgx.ParseConfig(dsn)
 			if err != nil {
 				return nil, err
 			}
-			pc.Database = database
+			if database != "" {
+				pc.Database = database
+			}
+			if cfg.ReadOnly {
+				pc.RuntimeParams["default_transaction_read_only"] = "on"
+			}
 			conn = stdlib.OpenDB(*pc)
 		}
 	case SQLServer:

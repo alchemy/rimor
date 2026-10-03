@@ -33,6 +33,11 @@ type run struct {
 	err *db.Error
 
 	grid grid
+
+	// Where the result comes from, found when a cell is first opened for
+	// editing; originErr is why it cannot be edited.
+	origin    *db.Origin
+	originErr error
 }
 
 // fetching reports whether rows are still arriving.
@@ -101,7 +106,12 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 	t.sessionCtx = t.ctx
 
 	gen, pool, database, session := t.runs, t.ctx.conn.pool, t.ctx.database, t.session
-	opts := db.RunOptions{MemoryLimit: q.memoryLimit, Cancel: cancel}
+	cfg := t.ctx.conn.cfg()
+	opts := db.RunOptions{
+		MemoryLimit: q.memoryLimit, Cancel: cancel,
+		// SQL Server cannot make a session read-only; rimor checks instead.
+		CheckReadOnly: cfg.ReadOnly && cfg.Driver == db.SQLServer,
+	}
 	exec := func() tea.Msg {
 		for attempt := 0; ; attempt++ {
 			if session == nil {
@@ -237,11 +247,13 @@ type ResultsPane struct {
 	width, height int
 	runKey        string // the run key for hints, as the terminal reports it
 	memoryLimit   int64  // for the "stopped at the limit" status
+	notice        string // shown in the footer until the next key
 }
 
 func (rp *ResultsPane) SetSize(width, height int) { rp.width, rp.height = width, height }
 
 func (rp *ResultsPane) Update(msg tea.KeyPressMsg, t *tab) tea.Cmd {
+	rp.notice = ""
 	if t == nil || t.run == nil {
 		return nil
 	}
@@ -279,6 +291,11 @@ func (rp *ResultsPane) Update(msg tea.KeyPressMsg, t *tab) tea.Cmd {
 	case "y":
 		if g.row < n {
 			return tea.SetClipboard(set.Cell(g.row, g.col).Text)
+		}
+	case "enter":
+		if g.row < n {
+			row, col := g.row, g.col
+			return func() tea.Msg { return openCellMsg{t, row, col} }
 		}
 	case "Y":
 		if g.row < n {
@@ -369,8 +386,10 @@ func (rp *ResultsPane) Footer(t *tab, focused bool) string {
 	switch {
 	case focused && t.run.fetching():
 		s += "  " + hints("esc", "stop")
+	case rp.notice != "":
+		s += "  " + rp.notice
 	case focused:
-		s += "  " + hints("y", "copy")
+		s += "  " + hints("⏎", "open", "y", "copy")
 	}
 	return s
 }

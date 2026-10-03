@@ -45,10 +45,11 @@ const (
 	fieldName = iota
 	fieldDriver
 	fieldDSN
+	fieldReadOnly
 	fieldCount
 )
 
-const labelWidth = 9
+const labelWidth = 11
 
 type testResultMsg struct {
 	gen int
@@ -56,13 +57,14 @@ type testResultMsg struct {
 }
 
 type connForm struct {
-	conn   *connection
-	taken  []string // names already used by other connections
-	width  int
-	name   textinput.Model
-	dsn    textinput.Model
-	driver int
-	field  int
+	conn     *connection
+	taken    []string // names already used by other connections
+	width    int
+	name     textinput.Model
+	dsn      textinput.Model
+	driver   int
+	readOnly bool
+	field    int
 
 	testing bool
 	testGen int
@@ -84,6 +86,7 @@ func newConnForm(conn *connection, names []string, maxWidth int) (*connForm, tea
 		f.name.SetValue(cfg.Name)
 		f.dsn.SetValue(cfg.DSN)
 		f.driver = max(slices.Index(db.Drivers, cfg.Driver), 0)
+		f.readOnly = cfg.ReadOnly
 	}
 	f.syncDriver()
 	return f, f.focus(fieldName)
@@ -107,6 +110,8 @@ func (f *connForm) cfg() db.Config {
 		Name:   strings.TrimSpace(f.name.Value()),
 		Driver: db.Drivers[f.driver],
 		DSN:    strings.TrimSpace(f.dsn.Value()),
+		// Read-only applies when connecting; editing a connection reopens it.
+		ReadOnly: f.readOnly,
 	}
 }
 
@@ -143,6 +148,37 @@ func (f *connForm) validate() bool {
 		return true
 	}
 	return false
+}
+
+// choice renders options as a segmented control, the chosen one marked.
+func (f *connForm) choice(options []string, chosen int, focused bool) string {
+	var parts []string
+	for i, o := range options {
+		st := mutedStyle.Padding(0, 1)
+		if i == chosen {
+			st = textStyle.Padding(0, 1)
+			if focused {
+				st = badgeFocusedStyle.Padding(0, 1)
+			}
+		}
+		parts = append(parts, st.Render(o))
+	}
+	return strings.Join(parts, " ")
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// readOnlyHint says who enforces read-only for a driver.
+func readOnlyHint(d db.Driver) string {
+	if d == db.SQLServer {
+		return "rimor refuses writes"
+	}
+	return "the database refuses writes"
 }
 
 func dsnLabel(d db.Driver) string {
@@ -199,10 +235,17 @@ func (f *connForm) Update(msg tea.Msg) (modal, tea.Cmd) {
 		case "ctrl+s":
 			return f, f.submit()
 		case "enter":
-			if f.field == fieldDSN {
+			if f.field == fieldCount-1 {
 				return f, f.submit()
 			}
 			return f, f.focus(f.field + 1)
+		}
+		if f.field == fieldReadOnly {
+			switch msg.String() {
+			case "left", "h", "right", "l", "space", "y", "n":
+				f.readOnly = msg.String() == "y" || (msg.String() != "n" && !f.readOnly)
+			}
+			return f, nil
 		}
 		if f.field == fieldDriver {
 			switch msg.String() {
@@ -274,6 +317,9 @@ func (f *connForm) View(int) string {
 		label(fieldDriver, "Driver") + strings.Join(drivers, " "),
 		"",
 		label(fieldDSN, dsnLabel(db.Drivers[f.driver])) + f.dsn.View(),
+		"",
+		label(fieldReadOnly, "Read-only") + f.choice([]string{"no", "yes"}, b2i(f.readOnly), f.field == fieldReadOnly) +
+			"  " + mutedStyle.Render(readOnlyHint(db.Drivers[f.driver])),
 		"",
 	}
 	if f.status != "" {

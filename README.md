@@ -56,6 +56,14 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   change data show the rows affected. Errors show the database's code and
   message, plus the failing line with a caret where the driver reports a
   position.
+- **Cell viewer and editing.** `enter` on a result cell opens its full value,
+  selected for copying. When the result comes from one table and includes
+  its key, the value can be edited there: rimor shows the `UPDATE` it will
+  run, changes only that row, and refuses if the row changed since it was
+  loaded. Editing works on PostgreSQL and SQL Server.
+- **Read-only connections.** A connection can be marked read-only: the
+  server (PostgreSQL) or the engine (SQLite) refuses writes, and on SQL Server
+  rimor refuses statements that write.
 - **Sessions per tab.** Each tab runs on its own connection, so `USE`, `SET`,
   temp tables and open transactions carry over between runs.
 - **Layout.** Drag the borders between panes, or resize from the keyboard.
@@ -100,6 +108,26 @@ The Nerd Font icons appear automatically when your terminal bundles them
 (kitty, Ghostty, WezTerm) or a Nerd Font is installed; otherwise rimor uses
 plain Unicode symbols. See `icons` in [Configuration](#configuration).
 
+## Editing data
+
+`enter` on a result cell opens it. The value is selected, so `ctrl+c` copies
+it. When rimor can tell which table row the cell comes from, the value can
+be changed in place:
+
+| Key | |
+|---|---|
+| `enter` | Save: rimor runs the `UPDATE` shown below the value |
+| `alt+enter` | New line |
+| `ctrl+n` | Set NULL |
+| `esc` | Close without saving |
+
+Editing needs a result from a single table that includes the table's
+primary key, or a unique key on non-null columns. Key columns and
+columns the database computes are not editable. The update only applies if
+the cell still holds the value it was opened with; otherwise rimor says the
+row changed and leaves it alone. It runs on the tab's connection, so inside
+an open transaction it can still be rolled back.
+
 ## Connections
 
 Press `a` in the explorer, or Enter on **New connection**, and give it a
@@ -119,6 +147,11 @@ not a database; the database goes in `?database=`. Add
 
 Connection strings are stored in plain text in `connections.json`, which is
 readable only by you.
+
+Mark a connection **read-only** in the same form. On PostgreSQL the server
+then refuses writes, and on SQLite the engine does. SQL Server has no
+read-only session setting, so rimor refuses statements that write, `EXEC`
+included; for a hard guarantee, use a login without write permissions.
 
 ## Keys
 
@@ -146,7 +179,7 @@ disconnects, `.` shows or hides a database's empty schemas.
 `ctrl+pgup/pgdn` or `alt+[`/`alt+]` switch tabs, `ctrl+e` changes the context,
 `esc` cancels a running query.
 
-**Results:** `esc` stops fetching, the arrows or `hjkl` move, `pgup`/`pgdn` page, `g`/`G` jump to the
+**Results:** `enter` opens the cell, `esc` stops fetching, the arrows or `hjkl` move, `pgup`/`pgdn` page, `g`/`G` jump to the
 first or last row, `home`/`end` to the first or last column, `y` copies the
 cell, `Y` copies the row.
 

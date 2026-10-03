@@ -40,6 +40,10 @@ const (
 type Model struct {
 	// Placeholder is shown, muted, while the buffer is empty.
 	Placeholder string
+	// ReadOnly allows moving, selecting and copying, but no changes.
+	ReadOnly bool
+	// NoLineNumbers hides the gutter.
+	NoLineNumbers bool
 
 	lines  [][]rune
 	cursor pos
@@ -145,6 +149,17 @@ func (m *Model) SetCursorPosition(line, col int) {
 	m.scroll()
 }
 
+// LineCount is the number of lines in the buffer.
+func (m *Model) LineCount() int { return len(m.lines) }
+
+// SelectAll selects the whole buffer, with the cursor at its end.
+func (m *Model) SelectAll() {
+	m.anchor = &pos{}
+	last := len(m.lines) - 1
+	m.cursor = pos{last, len(m.lines[last])}
+	m.scroll()
+}
+
 // SelectedText returns the selection, or "" when nothing is selected.
 func (m *Model) SelectedText() string {
 	a, b, ok := m.selection()
@@ -186,6 +201,9 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.PasteMsg:
+		if m.ReadOnly {
+			return nil
+		}
 		m.checkpoint(editOther)
 		m.insert(msg.Content)
 	case tea.KeyPressMsg:
@@ -201,6 +219,13 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
 	if m.handleMove(key) {
 		return nil
+	}
+	if m.ReadOnly {
+		switch key {
+		case "ctrl+a", "ctrl+c", "esc": // select and copy only
+		default:
+			return nil
+		}
 	}
 
 	switch key {
@@ -632,6 +657,9 @@ func (m *Model) colForDisplay(row, target int) int {
 }
 
 func (m *Model) gutterWidth() int {
+	if m.NoLineNumbers {
+		return 0
+	}
 	digits := len(itoa(len(m.lines)))
 	return max(digits, 3) + 2
 }
@@ -692,12 +720,15 @@ func (m *Model) View() string {
 			continue
 		}
 
-		num := itoa(r + 1)
-		g := m.gutter[0]
-		if r == m.cursor.row && m.focused {
-			g = m.gutter[1]
+		gutter := ""
+		if gw > 0 {
+			num := itoa(r + 1)
+			g := m.gutter[0]
+			if r == m.cursor.row && m.focused {
+				g = m.gutter[1]
+			}
+			gutter = g.Render(strings.Repeat(" ", gw-2-len(num))+num) + "  "
 		}
-		gutter := g.Render(strings.Repeat(" ", gw-2-len(num))+num) + "  "
 
 		var body string
 		if empty && y == 0 && m.Placeholder != "" {

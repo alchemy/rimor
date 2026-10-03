@@ -49,6 +49,9 @@ func (c queryContext) render() string {
 	if c.database != "" {
 		s += mutedStyle.Render(" › ") + textStyle.Render(c.database)
 	}
+	if cfg.ReadOnly {
+		s += mutedStyle.Render(" · read-only")
+	}
 	return s
 }
 

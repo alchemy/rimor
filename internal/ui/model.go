@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/lipgloss/v2"
 
@@ -221,6 +223,40 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case runDoneMsg, rowsMsg:
 		return m.query.Update(msg)
+
+	// The cell popup.
+	case openCellMsg:
+		if msg.tab.run == nil || msg.tab.run.res == nil || !msg.tab.run.res.HasRows() {
+			return nil
+		}
+		p := newCellPopup(msg.tab, msg.row, msg.col, m.dialogWidth())
+		m.modal = p
+		return m.prepareCell(p)
+	case cellReadyMsg:
+		if r := msg.popup.run; r.origin == nil && r.originErr == nil {
+			r.origin, r.originErr = msg.origin, msg.originErr // once per result
+		}
+		if m.modal == msg.popup {
+			msg.popup.ready(msg)
+		}
+		return nil
+	case cellSavedMsg:
+		p := msg.popup
+		if msg.err != nil {
+			p.phase = cellEditing
+			p.err = reasonFor(msg.err)
+			if errors.Is(msg.err, db.ErrRowChanged) {
+				p.phase, p.reason, p.err = cellViewing, reasonFor(msg.err), ""
+				p.ed.ReadOnly = true
+			}
+			return nil
+		}
+		p.run.res.Rows.SetCell(p.row, p.col, msg.value)
+		m.results.notice = okStyle.Render("✓ saved " + p.column.Name)
+		if m.modal == p {
+			m.modal = nil
+		}
+		return nil
 	case disconnectMsg:
 		m.query.StopConnection(msg.conn)
 		m.explorer.disconnect(msg.conn)
@@ -357,6 +393,15 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = true // to recheck the background, see FocusMsg
+	if p, ok := m.modal.(*cellPopup); ok && m.width >= minWidth && m.height >= minHeight {
+		if x, y, ok := p.cursor(); ok {
+			dx, dy := m.dialogPos(p.View(m.dialogWidth()))
+			c := tea.NewCursor(dx+x, dy+y)
+			c.Shape = tea.CursorBar
+			c.Color = colorAccent
+			v.Cursor = c
+		}
+	}
 	if m.modal == nil && m.width >= minWidth && m.height >= minHeight {
 		if x, y, ok := m.query.Cursor(); ok {
 			left := 0 // the query pane's left edge
@@ -420,6 +465,11 @@ func (m Model) renderPane(f focus, width, height int) string {
 	return p.render(m.results.View(cur, spin, focused), width, height, focused)
 }
 
+// dialogPos is where a dialog sits: centred, a third of the way down.
+func (m Model) dialogPos(dialog string) (x, y int) {
+	return (m.width - lipgloss.Width(dialog)) / 2, max((m.height-lipgloss.Height(dialog))/3, 0)
+}
+
 // dialogWidth and dialogHeight are the largest a dialog may be.
 func (m Model) dialogWidth() int  { return m.width - 4 }
 func (m Model) dialogHeight() int { return m.height - 2 }
@@ -454,8 +504,7 @@ func (m Model) render() string {
 		return base
 	}
 
-	x := (m.width - lipgloss.Width(dialog)) / 2
-	y := max((m.height-lipgloss.Height(dialog))/3, 0)
+	x, y := m.dialogPos(dialog)
 	return lipgloss.NewCompositor(
 		lipgloss.NewLayer(base),
 		lipgloss.NewLayer(dialog).X(x).Y(y).Z(1),

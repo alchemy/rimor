@@ -678,6 +678,9 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 				ic.color = &colorMuted // dim until connected
 			}
 			name, detail = cfg.Name, cfg.Driver.Short()
+			if cfg.ReadOnly {
+				detail += " · read-only"
+			}
 			nameStyle = nameStyle.Bold(true)
 		} else {
 			ic = objectIcon(n.obj, n.expanded)

@@ -212,3 +212,23 @@ func TestHighlightMultilineComment(t *testing.T) {
 		t.Fatalf("classes = %v", cls[1])
 	}
 }
+
+func TestReadOnly(t *testing.T) {
+	m := newModel()
+	m.SetText("keep me")
+	m.ReadOnly = true
+	typeText(m, "x")
+	press(m, "backspace", "enter", "ctrl+v")
+	m.Update(tea.PasteMsg{Content: "pasted"})
+	if got := m.Text(); got != "keep me" {
+		t.Fatalf("read-only text changed: %q", got)
+	}
+	press(m, "ctrl+a")
+	if got := m.SelectedText(); got != "keep me" {
+		t.Errorf("select all = %q", got)
+	}
+	m.NoLineNumbers = true
+	if row := strings.Split(m.View(), "\n")[0]; !strings.HasPrefix(ansi.Strip(row), "keep me") {
+		t.Errorf("gutter still shown: %q", ansi.Strip(row))
+	}
+}

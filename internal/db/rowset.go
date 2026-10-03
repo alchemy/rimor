@@ -79,6 +79,8 @@ type RowSet struct {
 	err     error
 	fetched time.Duration
 
+	edits map[[2]int]Value // cells changed after fetching, by row and column
+
 	updated chan struct{}
 	cancel  context.CancelFunc
 }
@@ -93,13 +95,26 @@ func (s *RowSet) Len() int {
 	return s.rows
 }
 
-// Cell returns a fetched cell.
+// Cell returns a fetched cell, or its edited value.
 func (s *RowSet) Cell(row, col int) Value {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if v, ok := s.edits[[2]int{row, col}]; ok {
+		return v
+	}
 	i := sort.Search(len(s.starts), func(i int) bool { return s.starts[i] > row }) - 1
 	c := s.chunks[i]
 	return c.cell((row-s.starts[i])*len(s.columns) + col)
+}
+
+// SetCell records a cell's value after an edit was saved.
+func (s *RowSet) SetCell(row, col int, v Value) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.edits == nil {
+		s.edits = map[[2]int]Value{}
+	}
+	s.edits[[2]int{row, col}] = v
 }
 
 // Numeric reports whether a column's values align right.
