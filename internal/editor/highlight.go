@@ -35,6 +35,10 @@ type Theme struct {
 	// ReverseSelection shows the selection in reverse video instead of the
 	// Selection background, for terminals without colour.
 	ReverseSelection bool
+	// FaintMuted draws comments, punctuation, line numbers and the
+	// placeholder with the faint attribute, for themes whose muted colour
+	// is the terminal's default one.
+	FaintMuted bool
 }
 
 func (t Theme) color(c class) color.Color {

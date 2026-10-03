@@ -225,6 +225,11 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.query.StopConnection(msg.conn)
 		m.explorer.disconnect(msg.conn)
 		return nil
+	case tea.FocusMsg:
+		// The terminal's theme may have changed while another window had
+		// focus (on Omarchy, a system theme switch): ask for the background
+		// again, which re-picks dark or light and re-shades the cursor row.
+		return tea.RequestBackgroundColor
 	case tea.BackgroundColorMsg:
 		if p := m.theme.forBackground(msg.Color, msg.IsDark()); p != current {
 			applyPalette(p)
@@ -351,6 +356,7 @@ func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeAllMotion
+	v.ReportFocus = true // to recheck the background, see FocusMsg
 	if m.modal == nil && m.width >= minWidth && m.height >= minHeight {
 		if x, y, ok := m.query.Cursor(); ok {
 			left := 0 // the query pane's left edge

@@ -697,7 +697,7 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 			nameStyle = nameStyle.Foreground(colorAccent)
 		}
 
-		s = indent + chevron + gap + st(lipgloss.NewStyle().Foreground(*ic.color)).Render(ic.String()) + gap +
+		s = indent + chevron + gap + st(iconStyle(ic)).Render(ic.String()) + gap +
 			st(nameStyle).Render(name)
 		if detail != "" {
 			s += st(plain).Render("  ") + st(mutedStyle).Render(detail)

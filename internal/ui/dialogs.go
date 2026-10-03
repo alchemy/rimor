@@ -470,7 +470,7 @@ func (p *contextPicker) View(int) string {
 		case it.ctx.database == "":
 			cfg := it.ctx.conn.cfg()
 			ic := driverIcon(cfg.Driver)
-			s = st(plain).Render("  ") + st(lipgloss.NewStyle().Foreground(*ic.color)).Render(ic.String()) + gap +
+			s = st(plain).Render("  ") + st(iconStyle(ic)).Render(ic.String()) + gap +
 				st(textStyle.Bold(true)).Render(cfg.Name) + st(plain).Render("  ")
 			switch {
 			case it.state.loading:

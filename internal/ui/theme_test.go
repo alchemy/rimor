@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"fmt"
 	"image/color"
 	"math"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -10,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"rimor.dev/internal/config"
+	"rimor.dev/internal/db"
 )
 
 func notOmarchy(t *testing.T) {
@@ -162,3 +166,71 @@ func contrast(a, b color.Color) float64 {
 	}
 	return (la + 0.05) / (lb + 0.05)
 }
+
+func TestTerminalThemeMutedIsFaint(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	defer applyPalette(darkPalette)
+	applyPalette(terminalPalette)
+
+	// Muted text is the default colour, faint; never ANSI 8 (90), which
+	// some palettes put next to the background.
+	if out := mutedStyle.Render("x"); !strings.Contains(out, "\x1b[2m") || strings.Contains(out, "90") {
+		t.Errorf("muted = %q", out)
+	}
+	// Borders keep ANSI 8: chrome may be subtle.
+	if out := borderStyle.Render("─"); !strings.Contains(out, "\x1b[90m") {
+		t.Errorf("border = %q", out)
+	}
+	// Dimmed icons follow muted text.
+	ic := iconServer
+	ic.color = &colorMuted
+	if out := iconStyle(ic).Render("x"); !strings.Contains(out, "\x1b[2m") {
+		t.Errorf("dim icon = %q", out)
+	}
+	// The editor's line numbers and comments too.
+	d := layoutDriver(t, "")
+	d.m.query.SetTheme(editorTheme)
+	d.key("alt+2")
+	d.send(tea.PasteMsg{Content: "SELECT 1 -- note"})
+	view := d.m.query.current().ed.View()
+	if !faintSGR.MatchString(view) {
+		t.Errorf("editor has no faint text:\n%q", view)
+	}
+
+	// The other themes keep their colours.
+	applyPalette(darkPalette)
+	if out := mutedStyle.Render("x"); strings.Contains(out, "\x1b[2m") {
+		t.Errorf("dark muted is faint: %q", out)
+	}
+}
+
+func TestFocusRechecksBackground(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	defer applyPalette(darkPalette)
+	s := config.Defaults()
+	s.Theme = config.ThemeTerminal
+	d := &driver{t: t, m: New(db.Store{Path: filepath.Join(t.TempDir(), "c.json")}, "", s)}
+	d.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if !d.m.View().ReportFocus {
+		t.Fatal("focus reports not enabled")
+	}
+
+	d.send(tea.BackgroundColorMsg{Color: lipgloss.Color("#1a1b26")}) // dark terminal
+	darkCursor := current.cursor
+
+	// Back from another window: rimor asks for the background again.
+	next, cmd := d.m.Update(tea.FocusMsg{})
+	d.m = next.(Model)
+	if cmd == nil || !strings.Contains(fmt.Sprintf("%T", cmd()), "ackground") {
+		t.Fatalf("focus did not request the background: %v", cmd)
+	}
+	// Meanwhile the system switched to a light theme.
+	d.send(tea.BackgroundColorMsg{Color: lipgloss.Color("#eff1f5")})
+	if current.cursor == darkCursor || luminance(current.cursor) < 0.5 {
+		t.Errorf("cursor row not re-shaded: %v", current.cursor)
+	}
+}
+
+// faintSGR matches an SGR sequence that turns on faint (2), alone or with
+// other attributes, e.g. ESC[2m or ESC[3;2m.
+var faintSGR = regexp.MustCompile("\x1b\\[(?:[0-9;]*;)?2(?:;[0-9;]*)?m")

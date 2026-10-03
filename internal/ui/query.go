@@ -45,7 +45,7 @@ func (c queryContext) render() string {
 	}
 	cfg := c.conn.cfg()
 	ic := driverIcon(cfg.Driver)
-	s := lipgloss.NewStyle().Foreground(*ic.color).Render(ic.String()) + " " + textStyle.Render(cfg.Name)
+	s := iconStyle(ic).Render(ic.String()) + " " + textStyle.Render(cfg.Name)
 	if c.database != "" {
 		s += mutedStyle.Render(" › ") + textStyle.Render(c.database)
 	}

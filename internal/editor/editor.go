@@ -87,15 +87,18 @@ func (m *Model) SetTheme(theme Theme) {
 		if c == clsComment {
 			base = base.Italic(true)
 		}
+		if theme.FaintMuted && (c == clsComment || c == clsPunctuation) {
+			base = base.Faint(true)
+		}
 		m.styles[c][0] = base
 		m.styles[c][1] = base.Background(theme.Selection)
 		if theme.ReverseSelection {
 			m.styles[c][1] = base.Reverse(true)
 		}
 	}
-	m.gutter[0] = lipgloss.NewStyle().Foreground(theme.LineNumber)
+	m.gutter[0] = lipgloss.NewStyle().Foreground(theme.LineNumber).Faint(theme.FaintMuted)
 	m.gutter[1] = lipgloss.NewStyle().Foreground(theme.CurrentLineNumber).Bold(true)
-	m.muted = lipgloss.NewStyle().Foreground(theme.Placeholder).Italic(true)
+	m.muted = lipgloss.NewStyle().Foreground(theme.Placeholder).Italic(true).Faint(theme.FaintMuted)
 }
 
 // SetLanguage picks the SQL dialect used for highlighting.

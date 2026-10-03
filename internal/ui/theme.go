@@ -32,6 +32,11 @@ type palette struct {
 	// reverse marks the cursor row, selection and badge with reverse video
 	// instead of background colours, for NO_COLOR.
 	reverse bool
+	// faint draws muted text (and the greys built on it) in the default
+	// colour with the faint attribute, which terminals render at reduced
+	// intensity from their own text colour: readable in any palette, where
+	// a fixed grey such as ANSI 8 can vanish into the background.
+	faint bool
 }
 
 // Catppuccin Mocha: soft, low-contrast chrome so the data stays the
@@ -63,18 +68,21 @@ var lightPalette = palette{
 }
 
 // The terminal's own 16 colours, so rimor follows its theme (on Omarchy,
-// the system theme). Text uses the terminal's default foreground. The
-// cursor and selection backgrounds are blended from the terminal's
-// background once it reports it (see terminalBackground); ANSI bright
-// black stands in until then.
+// the system theme). Text uses the terminal's default foreground, and
+// muted text that foreground drawn faint: ANSI bright black is too dim in
+// many palettes (Tokyo Night's is barely above its background), so it is
+// kept for borders only. The cursor and selection backgrounds are blended
+// from the terminal's background once it reports it (see
+// terminalBackground); ANSI bright black stands in until then.
 var terminalPalette = palette{
 	name:   config.ThemeTerminal,
 	accent: ansiColor(5), border: ansiColor(8),
-	text: lipgloss.NoColor{}, title: lipgloss.NoColor{}, muted: ansiColor(8),
+	text: lipgloss.NoColor{}, title: lipgloss.NoColor{}, muted: lipgloss.NoColor{},
 	onAccent: ansiColor(0), cursor: ansiColor(8), selection: ansiColor(8),
 	blue: ansiColor(4), sapphire: ansiColor(6), teal: ansiColor(6), green: ansiColor(2), yellow: ansiColor(3), peach: ansiColor(11),
-	red: ansiColor(1), pink: ansiColor(13), lavender: ansiColor(12), overlay: ansiColor(8), sky: ansiColor(14), maroon: ansiColor(9),
-	rosewater: lipgloss.NoColor{}, lineNumber: ansiColor(8),
+	red: ansiColor(1), pink: ansiColor(13), lavender: ansiColor(12), overlay: lipgloss.NoColor{}, sky: ansiColor(14), maroon: ansiColor(9),
+	rosewater: lipgloss.NoColor{}, lineNumber: lipgloss.NoColor{},
+	faint: true,
 }
 
 // NO_COLOR (https://no-color.org): no colours at all; selection shows as
@@ -126,12 +134,12 @@ func applyPalette(p palette) {
 	fg := func(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
 	borderStyle, borderFocusedStyle = fg(p.border), fg(p.accent)
 	titleStyle, titleFocusedStyle = fg(p.title), fg(p.accent).Bold(true)
-	badgeStyle = fg(p.muted)
+	badgeStyle = fg(p.muted).Faint(p.faint)
 	badgeFocusedStyle = fg(p.onAccent).Background(p.accent).Bold(true)
 	if p.reverse {
 		badgeFocusedStyle = lipgloss.NewStyle().Reverse(true).Bold(true)
 	}
-	textStyle, mutedStyle, hintKey = fg(p.text), fg(p.muted), fg(p.title)
+	textStyle, mutedStyle, hintKey = fg(p.text), fg(p.muted).Faint(p.faint), fg(p.title)
 	accentStyle, errorStyle, okStyle = fg(p.accent), fg(p.red), fg(p.green)
 	handleStyle = fg(p.lavender)
 	if p.reverse {
@@ -143,8 +151,17 @@ func applyPalette(p palette) {
 		Number: p.peach, Comment: p.muted, Operator: p.sky, Punctuation: p.overlay,
 		Variable: p.maroon, Quoted: p.rosewater, LineNumber: p.lineNumber,
 		CurrentLineNumber: p.accent, Selection: p.selection, Placeholder: p.muted,
-		ReverseSelection: p.reverse,
+		ReverseSelection: p.reverse, FaintMuted: p.faint,
 	}
+}
+
+// iconStyle colours an icon; grey icons are faint where muted text is.
+func iconStyle(ic icon) lipgloss.Style {
+	s := lipgloss.NewStyle().Foreground(*ic.color)
+	if current.faint && (ic.color == &colorMuted || ic.color == &colorOverlay) {
+		s = s.Faint(true)
+	}
+	return s
 }
 
 // onCursor marks a style as part of the selected row.
