@@ -6,6 +6,7 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -32,13 +33,15 @@ func TestChooseTheme(t *testing.T) {
 		}
 	}
 
+	// Omarchy is a Linux desktop; elsewhere its variable means nothing.
 	t.Setenv("OMARCHY_PATH", "/usr/share/omarchy")
-	if got := chooseTheme(config.ThemeAuto); got.palette.name != config.ThemeTerminal || got.detect {
-		t.Errorf("auto on Omarchy → %s", got.palette.name)
+	got := chooseTheme(config.ThemeAuto)
+	if onOmarchy := runtime.GOOS == "linux"; onOmarchy != (got.palette.name == config.ThemeTerminal && !got.detect) {
+		t.Errorf("auto with OMARCHY_PATH on %s → %s", runtime.GOOS, got.palette.name)
 	}
 
 	notOmarchy(t)
-	got := chooseTheme(config.ThemeAuto)
+	got = chooseTheme(config.ThemeAuto)
 	if got.palette.name != config.ThemeDark || !got.detect {
 		t.Errorf("auto elsewhere → %s detect=%v", got.palette.name, got.detect)
 	}

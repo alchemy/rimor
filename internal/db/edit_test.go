@@ -17,6 +17,10 @@ func pgSession(t *testing.T, cfg Config) *sql.Conn {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Closed synchronously, before the pool and the test's temporary files:
+	// Windows cannot delete a database file that is still open, and
+	// Pool.Close closes sessions in the background.
+	t.Cleanup(func() { pool.Release(s) })
 	return s
 }
 
@@ -189,8 +193,10 @@ func TestReadOnly(t *testing.T) {
 	if _, err := s.ExecContext(ctx, "INSERT INTO t VALUES (1)"); err == nil {
 		t.Error("SQLite read-only connection wrote")
 	}
-	if _, err := s.QueryContext(ctx, "SELECT * FROM t"); err != nil {
+	if rows, err := s.QueryContext(ctx, "SELECT * FROM t"); err != nil {
 		t.Errorf("SQLite read-only connection cannot read: %v", err)
+	} else {
+		rows.Close() // an open result keeps the connection, and the file, busy
 	}
 
 	// PostgreSQL: the server refuses writes.

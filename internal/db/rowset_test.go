@@ -31,6 +31,7 @@ func sqliteSession(t *testing.T) *sql.Conn {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { pool.Release(s) }) // before the temp dir goes (Windows)
 	return s
 }
 
