@@ -60,7 +60,7 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   selected for copying. When the result comes from one table and includes
   its key, the value can be edited there: rimor shows the `UPDATE` it will
   run, changes only that row, and refuses if the row changed since it was
-  loaded. Editing works on PostgreSQL and SQL Server.
+  loaded.
 - **Read-only connections.** A connection can be marked read-only: the
   server (PostgreSQL) or the engine (SQLite) refuses writes, and on SQL Server
   rimor refuses statements that write.
@@ -125,17 +125,21 @@ be changed in place:
 
 Saving runs the `UPDATE` shown below the value.
 
-**JSON** columns (`json` and `jsonb` on PostgreSQL; on SQL Server the 2025
-`json` type, and text columns with an enabled `ISJSON` check constraint)
-open highlighted in a larger editor, and are checked before saving:
+**JSON** columns open highlighted in a larger editor: `json` and `jsonb` on
+PostgreSQL; on SQL Server the 2025 `json` type and text columns with an
+enabled `ISJSON` check; on SQLite, which has no JSON type, columns declared
+`JSON` or `JSONB` and columns with a `json_valid` check. They are checked
+before saving:
 invalid JSON is never sent, and the cursor goes to the fault. `jsonb` and
 SQL Server's `json` open pretty-printed, since the database stores its own
-form anyway; PostgreSQL's `json` and SQL Server text columns keep text
+form anyway, and so does SQLite's binary JSONB, which rimor edits as text
+and stores back as JSONB. PostgreSQL's `json` and text columns keep text
 exactly as written, so they open as stored and `ctrl+f` formats them on
 request.
 
 Editing needs a result from a single table that includes the table's
-primary key, or a unique key on non-null columns. Key columns and
+primary key, or a unique key on non-null columns; on SQLite, a table
+without one can be edited through its `rowid` (`SELECT rowid, …`). Key columns and
 columns the database computes are not editable. The update only applies if
 the cell still holds the value it was opened with; otherwise rimor says the
 row changed and leaves it alone. It runs on the tab's connection, so inside

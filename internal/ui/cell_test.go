@@ -11,7 +11,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"rimor.dev/internal/config"
 	"rimor.dev/internal/db"
 )
 
@@ -191,19 +190,59 @@ func TestCellNotEditable(t *testing.T) {
 	ro.m.Close()
 }
 
-func TestCellSQLiteViewOnly(t *testing.T) {
+func TestCellSQLite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.db")
 	c, _ := sql.Open("sqlite", path)
-	c.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT); INSERT INTO t VALUES (1, 'x')")
-	c.Close()
-	d := queryDriver(t, db.Config{Name: "s", Driver: db.SQLite, DSN: path}, 0)
-	p := d.openCell("SELECT id, a FROM t", 0, 1)
-	if p.phase != cellViewing || !strings.Contains(p.reason, "SQLite") {
-		t.Errorf("sqlite: phase %d reason %q", p.phase, p.reason)
+	for _, stmt := range []string{
+		`CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, n INTEGER, bin JSONB)`,
+		`INSERT INTO t VALUES (1, 'x', 5, jsonb('{"k":[1,2]}'))`,
+		`CREATE TABLE nokey (a TEXT)`,
+		`INSERT INTO nokey VALUES ('old')`,
+	} {
+		if _, err := c.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if !strings.Contains(ansi.Strip(d.m.render()), "^c copy") {
-		t.Errorf("viewer hints missing")
+	defer c.Close()
+	d := queryDriver(t, db.Config{Name: "s", Driver: db.SQLite, DSN: path}, 2*time.Second)
+
+	p := d.openCell("SELECT id, a, n, bin FROM t", 0, 1)
+	if p.phase != cellEditing {
+		t.Fatalf("phase %d reason %q", p.phase, p.reason)
+	}
+	d.typeText("y")
+	d.key("enter")
+	var a string
+	c.QueryRow("SELECT a FROM t").Scan(&a)
+	if a != "y" {
+		t.Errorf("a = %q", a)
+	}
+
+	// JSONB: shown as pretty-printed JSON, saved back as binary.
+	d.key("right", "right", "enter")
+	p = d.popup()
+	if !p.json || !p.normalized || !strings.Contains(p.ed.Text(), "\n  \"k\": [") {
+		t.Fatalf("jsonb: json=%v normalized=%v text=%q", p.json, p.normalized, p.ed.Text())
+	}
+	d.key("ctrl+a")
+	d.typeText(`{"k": [3]}`)
+	d.key("ctrl+s")
+	var back, typ string
+	c.QueryRow("SELECT json(bin), typeof(bin) FROM t").Scan(&back, &typ)
+	if back != `{"k":[3]}` || typ != "blob" {
+		t.Errorf("bin = %q (%s)", back, typ)
+	}
+
+	// A table without a key, through its rowid.
+	p = d.openCell("SELECT rowid, a FROM nokey", 0, 1)
+	if p.phase != cellEditing {
+		t.Fatalf("rowid: phase %d reason %q", p.phase, p.reason)
+	}
+	d.typeText("new")
+	d.key("enter")
+	c.QueryRow("SELECT a FROM nokey").Scan(&a)
+	if a != "new" {
+		t.Errorf("nokey.a = %q", a)
 	}
 	d.m.Close()
-	_ = config.Defaults
 }

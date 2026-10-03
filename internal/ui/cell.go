@@ -46,8 +46,8 @@ type cellReadyMsg struct {
 	// originErr is why the whole result cannot be edited; cached on the run.
 	originErr error
 	cell      *db.Cell
-	current   *string // the value as the database writes it; nil for NULL
-	reason    string  // why this cell cannot be edited
+	current   db.Current // the value as the database writes it
+	reason    string     // why this cell cannot be edited
 	err       error
 }
 
@@ -70,10 +70,10 @@ type cellPopup struct {
 	err    string // the last failure, in red
 
 	cell     *db.Cell
-	old      *string // the value editing started from, nil for NULL
-	original string  // the editor text editing started from
-	null     bool    // the new value is NULL
-	nullAt   int     // editor version when NULL was chosen
+	old      db.Current // the value editing started from
+	original string     // the editor text editing started from
+	null     bool       // the new value is NULL
+	nullAt   int        // editor version when NULL was chosen
 
 	// json is a JSON column: highlighted, formatted with ctrl+f and
 	// validated before saving. normalized types (jsonb, SQL Server's json)
@@ -261,21 +261,23 @@ func (p *cellPopup) ready(msg cellReadyMsg) {
 	}
 	p.phase, p.cell, p.old = cellEditing, msg.cell, msg.current
 	p.ed.ReadOnly = false
-	if !p.json && msg.cell.Origin.IsJSON(p.col) {
-		// A text column kept to JSON by an ISJSON check: like PostgreSQL's
-		// json, highlighted and validated, stored as written.
-		p.json, p.normalized, p.multiline = true, false, true
+	if o := msg.cell.Origin; o.IsJSONB(p.col) || (!p.json && o.IsJSON(p.col)) {
+		// JSON the schema declares but the type does not show: an ISJSON
+		// check (SQL Server), a JSON type name or json_valid check
+		// (SQLite). SQLite's binary JSONB keeps no formatting, so it opens
+		// pretty-printed; the others are stored as written.
+		p.json, p.normalized, p.multiline = true, o.IsJSONB(p.col), true
 		p.ed.SetLanguage(editor.JSON)
 		p.setWidth(p.maxWidth)
 	}
-	if msg.current == nil {
+	if msg.current.Text == nil {
 		p.ed.SetText("")
 		p.null, p.nullAt = true, p.ed.Version()
 		p.original = ""
 	} else {
 		// The database's own text: it may differ from the grid's display,
 		// e.g. a time zone or all digits of a number.
-		text := *msg.current
+		text := *msg.current.Text
 		if p.normalized {
 			text = prettyJSON(text) // the database keeps its own form anyway
 		}
@@ -305,7 +307,7 @@ func (p *cellPopup) value() *string {
 }
 
 func (p *cellPopup) changed() bool {
-	if p.null != (p.old == nil) {
+	if p.null != (p.old.Text == nil) {
 		return true
 	}
 	return !p.null && p.ed.Text() != p.original

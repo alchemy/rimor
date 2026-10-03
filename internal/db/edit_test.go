@@ -63,7 +63,7 @@ func TestEditPostgres(t *testing.T) {
 	// Edit name of row 1: read, update, reload.
 	cell := Cell{Origin: o, Col: 1, Key: []string{"1"}}
 	cur, err := cell.Current(ctx, conn)
-	if err != nil || cur == nil || *cur != "bolt" {
+	if err != nil || cur.Text == nil || *cur.Text != "bolt" {
 		t.Fatalf("current = %v, %v", cur, err)
 	}
 	v := "hex bolt"
@@ -78,8 +78,8 @@ func TestEditPostgres(t *testing.T) {
 	// A typed column, converted by the database; then NULL.
 	price := Cell{Origin: o, Col: 2, Key: []string{"2"}}
 	old, _ := price.Current(ctx, conn)
-	if old != nil {
-		t.Fatalf("price of row 2 should be NULL, is %q", *old)
+	if old.Text != nil {
+		t.Fatalf("price of row 2 should be NULL, is %q", *old.Text)
 	}
 	ten := "10.5"
 	if got, err := price.Update(ctx, conn, old, &ten); err != nil || got.Text != "10.50" {
@@ -90,14 +90,15 @@ func TestEditPostgres(t *testing.T) {
 		t.Fatalf("set NULL = %+v, %v", got, err)
 	}
 	bad := "ten"
-	if _, err := price.Update(ctx, conn, nil, &bad); err == nil {
+	old, _ = price.Current(ctx, conn)
+	if _, err := price.Update(ctx, conn, old, &bad); err == nil {
 		t.Error("an invalid number was accepted")
 	}
 
 	// A timestamptz keeps its exact text, so an edit from it matches.
 	seen := Cell{Origin: o, Col: 3, Key: []string{"1"}}
 	old, _ = seen.Current(ctx, conn)
-	if old == nil || !strings.Contains(*old, "2026-10-01") {
+	if old.Text == nil || !strings.Contains(*old.Text, "2026-10-01") {
 		t.Fatalf("seen = %v", old)
 	}
 	later := "2026-10-02 08:00:00+00"
@@ -153,7 +154,7 @@ func TestEditSQLServer(t *testing.T) {
 
 	cell := Cell{Origin: o, Col: 1, Key: []string{id}}
 	cur, err := cell.Current(ctx, conn)
-	if err != nil || *cur != "bolt" {
+	if err != nil || cur.Text == nil || *cur.Text != "bolt" {
 		t.Fatalf("current = %v, %v", cur, err)
 	}
 	v := "nut"
@@ -163,7 +164,7 @@ func TestEditSQLServer(t *testing.T) {
 	// datetime2 keeps all seven digits through its exact text.
 	seen := Cell{Origin: o, Col: 3, Key: []string{id}}
 	old, err := seen.Current(ctx, conn)
-	if err != nil || old == nil || !strings.Contains(*old, ".1234567") {
+	if err != nil || old.Text == nil || !strings.Contains(*old.Text, ".1234567") {
 		t.Fatalf("seen = %v, %v", old, err)
 	}
 	later := "2026-10-02T08:00:00"

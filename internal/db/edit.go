@@ -43,9 +43,11 @@ type Origin struct {
 	// fixed marks source columns the database computes (generated,
 	// computed or identity columns).
 	fixed []bool
-	// json marks text columns an ISJSON check constraint keeps to JSON
-	// (SQL Server before its json type); they edit like PostgreSQL's json.
-	json []bool
+	// json marks text columns kept to JSON by the schema: an ISJSON check
+	// on SQL Server, a JSON declared type or json_valid check on SQLite.
+	// They edit like PostgreSQL's json. jsonb marks SQLite's binary JSONB,
+	// edited as text through json() and jsonb().
+	json, jsonb []bool
 
 	key []int // result columns of the key
 }
@@ -67,7 +69,7 @@ func (o *Origin) Editable(col int) error {
 }
 
 // FindOrigin works out where a query's result comes from. It does not run
-// the query: PostgreSQL describes the statement without executing it, SQL
+// the query: PostgreSQL and SQLite describe the prepared statement, SQL
 // Server analyses it with sp_describe_first_result_set.
 func FindOrigin(ctx context.Context, conn *sql.Conn, d Driver, query string, columns int) (*Origin, error) {
 	switch d {
@@ -75,8 +77,10 @@ func FindOrigin(ctx context.Context, conn *sql.Conn, d Driver, query string, col
 		return describePostgres(ctx, conn, query, columns)
 	case SQLServer:
 		return describeSQLServer(ctx, conn, query, columns)
+	case SQLite:
+		return describeSQLite(ctx, conn, query, columns)
 	}
-	return nil, notEditable("Editing results is not available for %s yet.", d.Label())
+	return nil, notEditable("Editing results is not available for %s.", d.Label())
 }
 
 func describePostgres(ctx context.Context, conn *sql.Conn, query string, columns int) (*Origin, error) {
@@ -395,13 +399,17 @@ func newOrigin(d Driver, columns int) *Origin {
 		driver:  d,
 		columns: make([]string, columns), types: make([]string, columns),
 		names: make([]string, columns), fixed: make([]bool, columns),
-		json: make([]bool, columns),
+		json: make([]bool, columns), jsonb: make([]bool, columns),
 	}
 }
 
 // IsJSON reports whether a text column is kept to JSON by an ISJSON check
 // constraint, the usual way to store JSON before SQL Server's json type.
 func (o *Origin) IsJSON(col int) bool { return o.json[col] }
+
+// IsJSONB reports SQLite's binary JSON: edited as text, pretty-printed,
+// since the binary form keeps no formatting.
+func (o *Origin) IsJSONB(col int) bool { return o.jsonb[col] }
 
 // findISJSON marks the columns covered by an enabled ISJSON check. SQL
 // Server stores constraint text normalised, as (isjson([doc])=(1)) or,
@@ -461,12 +469,28 @@ func (o *Origin) KeyValues(row func(col int) Value) ([]string, error) {
 	return vals, nil
 }
 
-// canonical is the column as text, the way the database writes it, so an
-// edited value can be compared exactly with what is stored.
-func (c Cell) canonical() string {
+// Current is a cell's value when editing began.
+type Current struct {
+	// Text is the value as the database writes it, for the editor; nil
+	// for NULL.
+	Text *string
+	// check is what the update compares the stored value against, to
+	// refuse an edit of a row changed meanwhile; nil for NULL.
+	check *string
+}
+
+// display is the column as text for the editor, the way the database
+// writes it: closer to what is stored than the grid's formatting.
+func (c Cell) display() string {
 	col := c.Origin.columns[c.Col]
-	if c.Origin.driver == Postgres {
+	switch c.Origin.driver {
+	case Postgres:
 		return col + "::text"
+	case SQLite:
+		if c.Origin.jsonb[c.Col] {
+			return "json(" + col + ")" // JSONB is binary; edit it as text
+		}
+		return "CAST(" + col + " AS TEXT)"
 	}
 	style := ""
 	switch t := strings.ToLower(c.Origin.types[c.Col]); {
@@ -478,17 +502,42 @@ func (c Cell) canonical() string {
 	return "CONVERT(nvarchar(max), " + col + style + ")"
 }
 
+// check is the column as the update compares it. SQLite values carry
+// their own type, so there quote() writes the value as an SQL literal,
+// which tells 5 from '5'; elsewhere the display text is exact.
+func (c Cell) check() string {
+	if c.Origin.driver == SQLite {
+		return "quote(" + c.Origin.columns[c.Col] + ")"
+	}
+	return c.display()
+}
+
 // param is the n-th (1-based) statement parameter, cast to a column type.
+// SQLite converts by the column's affinity instead.
 func (o *Origin) param(n int, typ string) string {
-	if o.driver == Postgres {
+	switch o.driver {
+	case Postgres:
 		return fmt.Sprintf("CAST(CAST($%d AS text) AS %s)", n, typ)
+	case SQLite:
+		return fmt.Sprintf("?%d", n)
 	}
 	return fmt.Sprintf("CAST(@p%d AS %s)", n, typ)
 }
 
+// value is the parameter that sets a column.
+func (c Cell) value(n int) string {
+	if c.Origin.driver == SQLite && c.Origin.jsonb[c.Col] {
+		return fmt.Sprintf("jsonb(?%d)", n) // edited as text, stored binary
+	}
+	return c.Origin.param(n, c.Origin.types[c.Col])
+}
+
 func (o *Origin) placeholder(n int) string {
-	if o.driver == Postgres {
+	switch o.driver {
+	case Postgres:
 		return fmt.Sprintf("$%d", n)
+	case SQLite:
+		return fmt.Sprintf("?%d", n)
 	}
 	return fmt.Sprintf("@p%d", n)
 }
@@ -504,47 +553,50 @@ func (c Cell) where(first int) (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
-// Current reads the cell's value as the database writes it, nil for
-// NULL, and checks that the key still finds exactly one row.
-func (c Cell) Current(ctx context.Context, conn *sql.Conn) (*string, error) {
+// Current reads the cell's value as the database writes it and checks
+// that the key still finds exactly one row.
+func (c Cell) Current(ctx context.Context, conn *sql.Conn) (Current, error) {
 	where, args := c.where(1)
-	rows, err := conn.QueryContext(ctx, "SELECT "+c.canonical()+" FROM "+c.Origin.table+" WHERE "+where, args...)
+	rows, err := conn.QueryContext(ctx, "SELECT "+c.display()+", "+c.check()+" FROM "+c.Origin.table+" WHERE "+where, args...)
 	if err != nil {
-		return nil, err
+		return Current{}, err
 	}
 	defer rows.Close()
-	var vals []*string
+	var vals []Current
 	for rows.Next() {
-		var v sql.NullString
-		if err := rows.Scan(&v); err != nil {
-			return nil, err
+		var text, check sql.NullString
+		if err := rows.Scan(&text, &check); err != nil {
+			return Current{}, err
 		}
-		if v.Valid {
-			vals = append(vals, &v.String)
-		} else {
-			vals = append(vals, nil)
+		var cur Current
+		if text.Valid {
+			cur.Text = &text.String
 		}
+		if check.Valid && !(c.Origin.driver == SQLite && check.String == "NULL") {
+			cur.check = &check.String
+		}
+		vals = append(vals, cur)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return Current{}, err
 	}
 	switch len(vals) {
 	case 0:
-		return nil, ErrRowChanged
+		return Current{}, ErrRowChanged
 	case 1:
 		return vals[0], nil
 	}
-	return nil, notEditable("The key matches %d rows, so rimor cannot tell which one to change.", len(vals))
+	return Current{}, notEditable("The key matches %d rows, so rimor cannot tell which one to change.", len(vals))
 }
 
-// Update sets the cell to value (nil for NULL) if it still holds old, as
-// read by Current, and returns the new value as the result would show it.
-func (c Cell) Update(ctx context.Context, conn *sql.Conn, old, value *string) (Value, error) {
+// Update sets the cell to value (nil for NULL) if it still holds what
+// Current read, and returns the new value as the result would show it.
+func (c Cell) Update(ctx context.Context, conn *sql.Conn, old Current, value *string) (Value, error) {
 	o := c.Origin
 	set := "NULL"
 	var args []any
 	if value != nil {
-		set = o.param(1, o.types[c.Col])
+		set = c.value(1)
 		args = append(args, *value)
 	}
 	where, keyArgs := c.where(len(args) + 1)
@@ -552,11 +604,11 @@ func (c Cell) Update(ctx context.Context, conn *sql.Conn, old, value *string) (V
 
 	// Only if the value is still the one the edit started from.
 	n := len(args) + 1
-	if old == nil {
-		where += " AND " + c.canonical() + " IS NULL"
+	if old.check == nil {
+		where += " AND " + o.columns[c.Col] + " IS NULL"
 	} else {
-		where += " AND " + c.canonical() + " = " + o.placeholder(n)
-		args = append(args, *old)
+		where += " AND " + c.check() + " = " + o.placeholder(n)
+		args = append(args, *old.check)
 	}
 
 	res, err := conn.ExecContext(ctx, "UPDATE "+o.table+" SET "+o.columns[c.Col]+" = "+set+" WHERE "+where, args...)
@@ -600,6 +652,9 @@ func (c Cell) Preview(value *string) string {
 	set := "NULL"
 	if value != nil {
 		set = lit(*value)
+		if o.driver == SQLite && o.jsonb[c.Col] {
+			set = "jsonb(" + set + ")"
+		}
 	}
 	var conds []string
 	for i, k := range o.key {
