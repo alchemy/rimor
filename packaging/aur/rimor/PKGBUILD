@@ -25,14 +25,17 @@ build() {
   export GOPATH="${srcdir}/gopath"
   # Pure Go, SQLite driver included: no cgo, so no C flags to pass on.
   export CGO_ENABLED=0
-  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  # No VCS stamping: makepkg may unpack the sources inside another git
+  # repository (an AUR clone, a CI checkout), whose state is not rimor's;
+  # the version comes from -ldflags instead.
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw -buildvcs=false"
   go build -ldflags "-X main.version=v${pkgver}" -o rimor ./cmd/rimor
 }
 
 check() {
   cd "${pkgname}-${pkgver}"
   export GOPATH="${srcdir}/gopath"
-  export GOFLAGS="-mod=readonly -modcacherw"
+  export GOFLAGS="-mod=readonly -modcacherw -buildvcs=false"
   # Database server tests skip without their RIMOR_TEST_* settings.
   go test ./...
 }
