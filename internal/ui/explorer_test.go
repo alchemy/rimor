@@ -99,7 +99,22 @@ func (d *driver) key(keys ...string) {
 			msg.Code = tea.KeyRight
 		case "backspace":
 			msg.Code = tea.KeyBackspace
+		case "delete":
+			msg.Code = tea.KeyDelete
+		case "home":
+			msg.Code = tea.KeyHome
+		case "end":
+			msg.Code = tea.KeyEnd
+		case "pgup":
+			msg.Code = tea.KeyPgUp
+		case "pgdown":
+			msg.Code = tea.KeyPgDown
+		case "space":
+			msg.Code, msg.Text = tea.KeySpace, " "
 		default:
+			if len([]rune(base)) > 1 {
+				d.t.Fatalf("key: unknown key name %q", base) // never guess a letter
+			}
 			msg.Code = []rune(base)[0]
 			if msg.Mod == 0 {
 				msg.Text = base
