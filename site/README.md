@@ -15,8 +15,8 @@ RIMOR_SITE=site go test ./internal/ui -run TestSiteScreens
 
 The test builds a small SQLite database, drives rimor into the state shown,
 and writes each theme's screen into `index.html` between its
-`<!-- screen:NAME -->` markers. The `terminal` screen uses the Tokyo Night
-palette.
+`<!-- screen:NAME -->` markers. The `terminal` screen uses the Gruvbox
+palette, chosen to look unlike the dark theme.
 
 ## Go import path
 

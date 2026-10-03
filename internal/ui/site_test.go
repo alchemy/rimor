@@ -56,17 +56,18 @@ func TestSiteScreens(t *testing.T) {
 	}
 }
 
-// tokyoNight is the terminal palette the "terminal" screen is shown with.
-var tokyoNight = struct {
+// gruvbox is the terminal palette the "terminal" screen is shown with:
+// warm, and unlike the dark theme's cool Catppuccin.
+var gruvbox = struct {
 	fg, bg color.Color
 	ansi   [16]color.Color
 }{
-	fg: lipgloss.Color("#c0caf5"), bg: lipgloss.Color("#1a1b26"),
+	fg: lipgloss.Color("#ebdbb2"), bg: lipgloss.Color("#282828"),
 	ansi: [16]color.Color{
-		lipgloss.Color("#15161e"), lipgloss.Color("#f7768e"), lipgloss.Color("#9ece6a"), lipgloss.Color("#e0af68"),
-		lipgloss.Color("#7aa2f7"), lipgloss.Color("#bb9af7"), lipgloss.Color("#7dcfff"), lipgloss.Color("#a9b1d6"),
-		lipgloss.Color("#414868"), lipgloss.Color("#ff899d"), lipgloss.Color("#9fe044"), lipgloss.Color("#faba4a"),
-		lipgloss.Color("#8db0ff"), lipgloss.Color("#c7a9ff"), lipgloss.Color("#a4daff"), lipgloss.Color("#c0caf5"),
+		lipgloss.Color("#282828"), lipgloss.Color("#cc241d"), lipgloss.Color("#98971a"), lipgloss.Color("#d79921"),
+		lipgloss.Color("#458588"), lipgloss.Color("#b16286"), lipgloss.Color("#689d6a"), lipgloss.Color("#a89984"),
+		lipgloss.Color("#928374"), lipgloss.Color("#fb4934"), lipgloss.Color("#b8bb26"), lipgloss.Color("#fabd2f"),
+		lipgloss.Color("#83a598"), lipgloss.Color("#d3869b"), lipgloss.Color("#8ec07c"), lipgloss.Color("#ebdbb2"),
 	},
 }
 
@@ -103,7 +104,7 @@ func siteScreen(t *testing.T, theme string) string {
 	d := &driver{t: t, m: New(store, "", settings)}
 	d.send(tea.WindowSizeMsg{Width: 112, Height: 28})
 	if theme == config.ThemeTerminal {
-		d.send(tea.BackgroundColorMsg{Color: tokyoNight.bg})
+		d.send(tea.BackgroundColorMsg{Color: gruvbox.bg})
 	}
 	d.send(tea.KeyboardEnhancementsMsg{Flags: 1}) // show ^⏎ as a modern terminal would
 
@@ -151,20 +152,20 @@ var sgr = regexp.MustCompile("\x1b\\[([0-9;]*)m")
 var defaults = map[string][2]color.Color{
 	config.ThemeDark:     {lipgloss.Color("#cdd6f4"), lipgloss.Color("#1e1e2e")},
 	config.ThemeLight:    {lipgloss.Color("#4c4f69"), lipgloss.Color("#eff1f5")},
-	config.ThemeTerminal: {tokyoNight.fg, tokyoNight.bg},
+	config.ThemeTerminal: {gruvbox.fg, gruvbox.bg},
 }
 
 // toHTML turns SGR-coloured text into spans with inline colours. Basic
-// ANSI colours resolve through Tokyo Night for the terminal theme.
+// ANSI colours resolve through Gruvbox for the terminal theme.
 func toHTML(s, theme string) string {
 	type state struct {
-		fg, bg                       color.Color
-		bold, italic, under, reverse bool
+		fg, bg                              color.Color
+		bold, faint, italic, under, reverse bool
 	}
 	var st state
 	basic := func(n int) color.Color {
 		if theme == config.ThemeTerminal {
-			return tokyoNight.ansi[n]
+			return gruvbox.ansi[n]
 		}
 		return nil
 	}
@@ -181,6 +182,13 @@ func toHTML(s, theme string) string {
 			open = false
 		}
 		fg, bg := st.fg, st.bg
+		if st.faint {
+			// Terminals draw faint text about halfway to the background.
+			if fg == nil {
+				fg = defaults[theme][0]
+			}
+			fg = mix(fg, defaults[theme][1], 0.45)
+		}
 		if st.reverse {
 			// Reverse video swaps in the screen's default colours.
 			if fg == nil {
@@ -225,6 +233,8 @@ func toHTML(s, theme string) string {
 				st = state{}
 			case n == 1:
 				st.bold = true
+			case n == 2:
+				st.faint = true
 			case n == 3:
 				st.italic = true
 			case n == 4:
@@ -232,7 +242,7 @@ func toHTML(s, theme string) string {
 			case n == 7:
 				st.reverse = true
 			case n == 22:
-				st.bold = false
+				st.bold, st.faint = false, false
 			case n == 23:
 				st.italic = false
 			case n == 24:

@@ -9,120 +9,126 @@
 <meta name="go-source" content="rimor.dev https://github.com/alchemy/rimor https://github.com/alchemy/rimor/tree/master{/dir} https://github.com/alchemy/rimor/blob/master{/dir}/{file}#L{line}">
 <meta property="og:title" content="rimor">
 <meta property="og:description" content="A terminal workbench for PostgreSQL, SQL Server and SQLite.">
-<meta name="theme-color" content="#181825" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#e6e9ef" media="(prefers-color-scheme: light)">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231e1e2e'/%3E%3Cpath d='M3 4h10v8H3z' fill='none' stroke='%23cba6f7' stroke-width='1.4'/%3E%3Cpath d='M3 7h10' stroke='%23cba6f7' stroke-width='1.4'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fcfcfc" media="(prefers-color-scheme: light)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23000000'/%3E%3Cpath d='M3 4h10v8H3z' fill='none' stroke='%23ffffff' stroke-width='1.4'/%3E%3Cpath d='M3 7h10' stroke='%23ffffff' stroke-width='1.4'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
 <style>
-/* Palettes: rimor's own themes. "terminal" is shown with Tokyo Night. */
-:root, [data-theme="dark"] {
-  --page: #181825; --screen: #1e1e2e; --line: #313244;
-  --text: #cdd6f4; --sub: #a6adc8; --muted: #7f849c; --accent: #cba6f7;
+/* The page is black and white so the only colour is rimor's screen. Light
+   for the light screen; dark for the dark and terminal ones. */
+:root, [data-theme="dark"], [data-theme="terminal"] {
+  --bg: #0a0a0a; --fg: #ededed; --sub: #a3a3a3; --muted: #6e6e6e;
+  --line: #262626; --well: #151515;
   color-scheme: dark;
 }
 [data-theme="light"] {
-  --page: #e6e9ef; --screen: #eff1f5; --line: #ccd0da;
-  --text: #4c4f69; --sub: #5c5f77; --muted: #6c6f85; --accent: #8839ef;
+  --bg: #fcfcfc; --fg: #0f0f0f; --sub: #4a4a4a; --muted: #737373;
+  --line: #e2e2e2; --well: #f1f1f1;
   color-scheme: light;
 }
-[data-theme="terminal"] {
-  --page: #16161e; --screen: #1a1b26; --line: #292e42;
-  --text: #c0caf5; --sub: #a9b1d6; --muted: #737aa2; --accent: #bb9af7;
-  color-scheme: dark;
-}
-/* Without a choice yet, follow the system. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
-    --page: #e6e9ef; --screen: #eff1f5; --line: #ccd0da;
-    --text: #4c4f69; --sub: #5c5f77; --muted: #6c6f85; --accent: #8839ef;
+    --bg: #fcfcfc; --fg: #0f0f0f; --sub: #4a4a4a; --muted: #737373;
+    --line: #e2e2e2; --well: #f1f1f1;
     color-scheme: light;
   }
+}
+/* Each screen sits on its theme's own background. */
+:root, [data-theme="dark"] { --screen-bg: #1e1e2e; }
+[data-theme="light"] { --screen-bg: #eff1f5; }
+[data-theme="terminal"] { --screen-bg: #282828; }
+@media (prefers-color-scheme: light) { :root:not([data-theme]) { --screen-bg: #eff1f5; } }
+
+/* One width for everything: the screen's. Its font size is derived from
+   it: 112 columns of JetBrains Mono, 0.6em each. */
+:root {
+  --w: min(62rem, 100vw - 2.5rem);
+  --pad: 1.25rem;
 }
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  background: var(--page);
-  color: var(--text);
-  font: 400 1.1875rem/1.6 "Newsreader", Georgia, serif;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 1.125rem/1.6 "Newsreader", Georgia, serif;
   font-optical-sizing: auto;
-  transition: background-color .35s ease, color .35s ease;
+  transition: background-color .3s ease, color .3s ease;
 }
-.mono, code, pre, kbd { font-family: "JetBrains Mono", ui-monospace, monospace; }
-a { color: inherit; text-decoration-color: var(--accent); text-underline-offset: .18em; }
-a:hover { color: var(--accent); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+code, pre, kbd { font-family: "JetBrains Mono", ui-monospace, monospace; }
+a { color: inherit; text-underline-offset: .2em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; border-radius: 2px; }
 
-.column { width: min(42rem, 100% - 2.5rem); margin-inline: auto; }
+.wrap { width: var(--w); margin-inline: auto; }
 
 /* Header */
-header.column {
+header.wrap {
   display: flex; justify-content: space-between; align-items: baseline;
   padding-block: 1.75rem 0;
   font: 400 .875rem/1 "JetBrains Mono", monospace;
   color: var(--sub);
 }
 header nav a { text-decoration: none; }
+header nav a:hover { color: var(--fg); text-decoration: underline; }
 header nav a + a { margin-left: 1.5rem; }
 
-/* Hero */
-.hero { padding-block: 4.5rem 2.5rem; }
+/* Hero: the name on the left, what it is and how to get it on the right. */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  column-gap: 3rem;
+  align-items: end;
+  padding-block: 5rem 3rem;
+}
 .wordmark {
   margin: 0;
-  font: 300 clamp(4rem, 13vw, 7.5rem)/.9 "JetBrains Mono", monospace;
-  letter-spacing: -.045em;
+  font: 300 clamp(4rem, 9vw, 7rem)/.85 "JetBrains Mono", monospace;
+  letter-spacing: -.05em;
 }
-.gloss {
-  margin: 1.25rem 0 0;
-  font-style: italic;
-  color: var(--sub);
-}
-.lede { margin: 1.75rem 0 0; font-size: 1.375rem; line-height: 1.5; max-width: 34em; }
+.gloss { margin: 1rem 0 0; font-style: italic; color: var(--sub); }
+.lede { margin: 0; font-size: 1.4375rem; line-height: 1.45; }
 
 .install {
   display: flex; align-items: center; gap: 1rem;
-  margin-top: 2.25rem;
-  padding: .85rem 1rem .85rem 1.1rem;
-  border: 1px solid var(--line);
+  margin-top: 1.5rem;
+  padding: .8rem .8rem .8rem 1rem;
+  background: var(--well);
   border-radius: 6px;
-  background: var(--screen);
   font: 400 .9375rem/1.4 "JetBrains Mono", monospace;
-  overflow-x: auto;
 }
-.install code { flex: 1; white-space: nowrap; }
+.install code { flex: 1; overflow-x: auto; white-space: nowrap; }
 .install code::before { content: "$ "; color: var(--muted); }
 .install button {
   flex: none;
   font: inherit; font-size: .8125rem;
-  color: var(--sub); background: none;
+  color: var(--fg); background: var(--bg);
   border: 1px solid var(--line); border-radius: 4px;
   padding: .3rem .7rem; cursor: pointer;
 }
-.install button:hover { color: var(--accent); border-color: var(--accent); }
+.install button:hover { border-color: var(--fg); }
 
-/* The screen: the real UI, drawn by rimor itself. */
-/* The stage hugs the screen; on narrow viewports the frame scrolls. */
-.stage { width: fit-content; max-width: calc(100% - 2.5rem); margin: 1rem auto 0; }
+/* The screen: the real interface, drawn by rimor itself. */
 .frame {
-  border: 1px solid var(--line);
+  width: var(--w);
+  margin-inline: auto;
+  padding: var(--pad);
   border-radius: 10px;
-  background: var(--screen);
-  padding: 1.1rem 1.2rem;
+  background: var(--screen-bg);
   overflow-x: auto;
-  transition: background-color .35s ease, border-color .35s ease;
+  transition: background-color .3s ease;
 }
 .screen {
   display: none;
-  margin: 0 auto;
+  margin: 0;
   width: max-content;
-  font: 400 clamp(8.5px, calc((min(72rem, 100vw - 2.5rem) - 2.5rem) / 112 / .6), 14px)/1.2 "JetBrains Mono", monospace;
+  font: 400 max(8.5px, calc((var(--w) - 2 * var(--pad)) / 67.2))/1.2 "JetBrains Mono", monospace;
   font-variant-ligatures: none;
   white-space: pre;
 }
-/* Show the screen of the active theme; without a choice, the system's. */
 :root:not([data-theme]) .screen[data-for="dark"],
 [data-theme="dark"] .screen[data-for="dark"],
 [data-theme="light"] .screen[data-for="light"],
@@ -132,9 +138,10 @@ header nav a + a { margin-left: 1.5rem; }
   :root:not([data-theme]) .screen[data-for="light"] { display: block; }
 }
 
-/* Theme switch, named as in config.toml. */
+/* Theme switch, named as in config.toml; the chosen one is reversed, as
+   rimor marks a selection without colour. */
 .themes {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1.5rem;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1.5rem;
   margin-top: 1rem;
   font: 400 .875rem/1.5 "JetBrains Mono", monospace;
   color: var(--muted);
@@ -144,63 +151,75 @@ header nav a + a { margin-left: 1.5rem; }
 .themes label {
   position: relative;
   padding: .15rem .6rem;
+  border: 1px solid var(--line);
   border-radius: 4px;
   color: var(--sub);
   cursor: pointer;
 }
+.themes label:hover { color: var(--fg); border-color: var(--sub); }
 .themes input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
-.themes label:has(input:checked) { color: var(--page); background: var(--accent); }
-.themes label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-.themes .note { flex: 1 1 18rem; }
+.themes label:has(input:checked) { color: var(--bg); background: var(--fg); border-color: var(--fg); }
+.themes label:has(input:focus-visible) { outline: 2px solid var(--fg); outline-offset: 2px; }
+.themes .note { flex: 1 1 20rem; }
 .no-js .themes fieldset { display: none; }
 
-/* Content */
-section { padding-block: 4rem 0; }
+/* Sections */
+section { padding-block: 5rem 0; }
 h2 {
-  margin: 0 0 1.5rem;
+  margin: 0 0 2rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--line);
   font: 600 1.625rem/1.25 "Newsreader", Georgia, serif;
 }
-dl { margin: 0; display: grid; grid-template-columns: 9.5rem 1fr; gap: 1.1rem 1.75rem; }
-dt { font: 700 .9375rem/1.9 "JetBrains Mono", monospace; color: var(--accent); }
-dd { margin: 0; }
-kbd {
+.features {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem 3rem;
+}
+.features dt { font: 700 .9375rem/1.5 "JetBrains Mono", monospace; margin-bottom: .35rem; }
+.features dd { margin: 0; color: var(--sub); }
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem 3rem;
+}
+h3 { margin: 0 0 .5rem; font: 700 .9375rem/1.5 "JetBrains Mono", monospace; }
+p { margin: 0 0 1rem; }
+kbd, .features code, .after code {
   font-size: .82em;
   padding: .05em .35em;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: var(--screen);
   white-space: nowrap;
 }
-p { margin: 0 0 1rem; }
 pre.block {
-  margin: 0 0 1.25rem;
-  padding: .85rem 1.1rem;
-  border: 1px solid var(--line);
+  margin: 0;
+  padding: .85rem 1rem;
+  background: var(--well);
   border-radius: 6px;
-  background: var(--screen);
   font-size: .875rem; line-height: 1.6;
   overflow-x: auto;
 }
 .prompt { color: var(--muted); }
-.quiet { color: var(--sub); }
+.after { margin-top: 2rem; max-width: 40rem; color: var(--sub); }
 
-footer.column {
-  margin-top: 5rem;
+footer.wrap {
+  margin-top: 6rem;
   padding-block: 1.5rem 3rem;
   border-top: 1px solid var(--line);
   font: 400 .875rem/1.6 "JetBrains Mono", monospace;
   color: var(--muted);
 }
 
-@media (max-width: 40rem) {
+@media (max-width: 48rem) {
   body { font-size: 1.0625rem; }
+  .hero { grid-template-columns: 1fr; padding-block: 3rem 2rem; }
+  .lede { margin-top: 1.75rem; font-size: 1.1875rem; }
+  .features, .columns { grid-template-columns: 1fr; }
   /* Wrap the command at its slashes rather than hiding its end. */
   .install { font-size: .8125rem; align-items: flex-start; }
   .install code { white-space: normal; overflow-wrap: anywhere; }
-  .hero { padding-block: 3rem 2rem; }
-  .lede { font-size: 1.1875rem; }
-  dl { grid-template-columns: 1fr; gap: .2rem; }
-  dd + dt { margin-top: .9rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   body, .frame { transition: none; }
@@ -209,7 +228,7 @@ footer.column {
 </head>
 <body class="no-js">
 
-<header class="column">
+<header class="wrap">
   <span>rimor.dev</span>
   <nav>
     <a href="https://github.com/alchemy/rimor">Source</a>
@@ -218,20 +237,23 @@ footer.column {
 </header>
 
 <main>
-  <div class="column hero">
-    <h1 class="wordmark">rimor</h1>
-    <p class="gloss">Latin: I probe, I search thoroughly.</p>
-    <p class="lede">A terminal workbench for PostgreSQL, SQL&nbsp;Server and SQLite.
-      Browse the catalog, write SQL in tabs and scroll through millions of rows
-      without leaving the keyboard.</p>
-    <div class="install">
-      <code id="install-cmd">go install rimor.dev/cmd/rimor@latest</code>
-      <button type="button" data-copy="install-cmd" hidden>Copy</button>
+  <div class="wrap hero">
+    <div>
+      <h1 class="wordmark">rimor</h1>
+      <p class="gloss">Latin: I probe, I search thoroughly.</p>
+    </div>
+    <div>
+      <p class="lede">A terminal workbench for PostgreSQL, SQL&nbsp;Server and SQLite.
+        Browse the catalog, write SQL in tabs and scroll through millions of
+        rows without leaving the keyboard.</p>
+      <div class="install">
+        <code id="install-cmd">go install rimor.dev/cmd/rimor@latest</code>
+        <button type="button" data-copy="install-cmd" hidden>Copy</button>
+      </div>
     </div>
   </div>
 
-  <div class="stage">
-    <div class="frame" role="img" aria-label="rimor showing a database tree, a query with syntax highlighting, and its results">
+  <div class="frame" role="img" aria-label="rimor showing a database tree, a query with syntax highlighting, and its results">
 <pre class="screen" data-for="dark" aria-hidden="true"><!-- screen:dark --><span style="color:#45475a">╭─</span><span style="color:#6c7086"> 1 </span> <span style="color:#a6adc8">Explorer</span> <span style="color:#45475a">────────────╮</span><span style="color:#45475a">╭─</span><span style="color:#6c7086"> 2 </span> <span style="color:#94e2d5">●</span> <span style="color:#6c7086">orders.sql</span><span style="color:#45475a"> ─ </span><span style="color:#94e2d5">●</span> <span style="color:#cdd6f4;font-weight:700">best-customers.sql</span> <span style="color:#45475a">─────────────────────────────────────────╮</span>
 <span style="color:#45475a">│</span>   <span style="color:#cba6f7">+</span> <span style="color:#cba6f7">New connection</span>       <span style="color:#45475a">│</span><span style="color:#45475a">│</span><span style="color:#585b70">  1</span>  <span style="color:#6c7086;font-style:italic">-- Best customers this month</span>                                                 <span style="color:#45475a">│</span>
 <span style="color:#45475a">│</span>                          <span style="color:#45475a">│</span><span style="color:#45475a">│</span><span style="color:#585b70">  2</span>  <span style="color:#cba6f7">SELECT</span><span style="color:#cdd6f4"> </span><span style="color:#cba6f7">c</span><span style="color:#9399b2">.</span><span style="color:#cdd6f4">name</span><span style="color:#9399b2">,</span><span style="color:#cdd6f4"> </span><span style="color:#cba6f7">c</span><span style="color:#9399b2">.</span><span style="color:#cdd6f4">city</span><span style="color:#9399b2">,</span>                                                       <span style="color:#45475a">│</span>
@@ -259,7 +281,7 @@ footer.column {
 <span style="color:#45475a">│</span>                          <span style="color:#45475a">│</span><span style="color:#cba6f7">│</span>                                                                                  <span style="color:#cba6f7">│</span>
 <span style="color:#45475a">│</span>                          <span style="color:#45475a">│</span><span style="color:#cba6f7">│</span>                                                                                  <span style="color:#cba6f7">│</span>
 <span style="color:#45475a">│</span>                          <span style="color:#45475a">│</span><span style="color:#cba6f7">│</span>                                                                                  <span style="color:#cba6f7">│</span>
-<span style="color:#45475a">╰</span><span style="color:#45475a">─────────────────────────</span><span style="color:#45475a">─╯</span><span style="color:#cba6f7">╰</span><span style="color:#cba6f7">─</span> <span style="color:#a6e3a1">✓ </span><span style="color:#cdd6f4">6 rows</span><span style="color:#6c7086"> · 1 ms</span> <span style="color:#cba6f7">──────────────────────────────────────</span> <span style="color:#6c7086">2/6 · city text</span>  <span style="color:#a6adc8">y</span><span style="color:#6c7086"> copy</span> <span style="color:#cba6f7">─╯</span><!-- /screen:dark --></pre>
+<span style="color:#45475a">╰</span><span style="color:#45475a">─────────────────────────</span><span style="color:#45475a">─╯</span><span style="color:#cba6f7">╰</span><span style="color:#cba6f7">─</span> <span style="color:#a6e3a1">✓ </span><span style="color:#cdd6f4">6 rows</span><span style="color:#6c7086"> · &lt;1 ms</span> <span style="color:#cba6f7">─────────────────────────────────────</span> <span style="color:#6c7086">2/6 · city text</span>  <span style="color:#a6adc8">y</span><span style="color:#6c7086"> copy</span> <span style="color:#cba6f7">─╯</span><!-- /screen:dark --></pre>
 <pre class="screen" data-for="light" aria-hidden="true"><!-- screen:light --><span style="color:#bcc0cc">╭─</span><span style="color:#7c7f93"> 1 </span> <span style="color:#5c5f77">Explorer</span> <span style="color:#bcc0cc">────────────╮</span><span style="color:#bcc0cc">╭─</span><span style="color:#7c7f93"> 2 </span> <span style="color:#179299">●</span> <span style="color:#7c7f93">orders.sql</span><span style="color:#bcc0cc"> ─ </span><span style="color:#179299">●</span> <span style="color:#4c4f69;font-weight:700">best-customers.sql</span> <span style="color:#bcc0cc">─────────────────────────────────────────╮</span>
 <span style="color:#bcc0cc">│</span>   <span style="color:#8839ef">+</span> <span style="color:#8839ef">New connection</span>       <span style="color:#bcc0cc">│</span><span style="color:#bcc0cc">│</span><span style="color:#9ca0b0">  1</span>  <span style="color:#7c7f93;font-style:italic">-- Best customers this month</span>                                                 <span style="color:#bcc0cc">│</span>
 <span style="color:#bcc0cc">│</span>                          <span style="color:#bcc0cc">│</span><span style="color:#bcc0cc">│</span><span style="color:#9ca0b0">  2</span>  <span style="color:#8839ef">SELECT</span><span style="color:#4c4f69"> </span><span style="color:#8839ef">c</span><span style="color:#8c8fa1">.</span><span style="color:#4c4f69">name</span><span style="color:#8c8fa1">,</span><span style="color:#4c4f69"> </span><span style="color:#8839ef">c</span><span style="color:#8c8fa1">.</span><span style="color:#4c4f69">city</span><span style="color:#8c8fa1">,</span>                                                       <span style="color:#bcc0cc">│</span>
@@ -287,101 +309,124 @@ footer.column {
 <span style="color:#bcc0cc">│</span>                          <span style="color:#bcc0cc">│</span><span style="color:#8839ef">│</span>                                                                                  <span style="color:#8839ef">│</span>
 <span style="color:#bcc0cc">│</span>                          <span style="color:#bcc0cc">│</span><span style="color:#8839ef">│</span>                                                                                  <span style="color:#8839ef">│</span>
 <span style="color:#bcc0cc">│</span>                          <span style="color:#bcc0cc">│</span><span style="color:#8839ef">│</span>                                                                                  <span style="color:#8839ef">│</span>
-<span style="color:#bcc0cc">╰</span><span style="color:#bcc0cc">─────────────────────────</span><span style="color:#bcc0cc">─╯</span><span style="color:#8839ef">╰</span><span style="color:#8839ef">─</span> <span style="color:#40a02b">✓ </span><span style="color:#4c4f69">6 rows</span><span style="color:#7c7f93"> · 1 ms</span> <span style="color:#8839ef">──────────────────────────────────────</span> <span style="color:#7c7f93">2/6 · city text</span>  <span style="color:#5c5f77">y</span><span style="color:#7c7f93"> copy</span> <span style="color:#8839ef">─╯</span><!-- /screen:light --></pre>
-<pre class="screen" data-for="terminal" aria-hidden="true"><!-- screen:terminal --><span style="color:#414868">╭─</span><span style="color:#414868"> 1 </span> Explorer <span style="color:#414868">────────────╮</span><span style="color:#414868">╭─</span><span style="color:#414868"> 2 </span> <span style="color:#7dcfff">●</span> <span style="color:#414868">orders.sql</span><span style="color:#414868"> ─ </span><span style="color:#7dcfff">●</span> <span style="font-weight:700">best-customers.sql</span> <span style="color:#414868">─────────────────────────────────────────╮</span>
-<span style="color:#414868">│</span>   <span style="color:#bb9af7">+</span> <span style="color:#bb9af7">New connection</span>       <span style="color:#414868">│</span><span style="color:#414868">│</span><span style="color:#414868">  1</span>  <span style="color:#414868;font-style:italic">-- Best customers this month</span>                                                 <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#414868">│</span><span style="color:#414868">  2</span>  <span style="color:#bb9af7">SELECT</span> <span style="color:#bb9af7">c</span><span style="color:#414868">.</span>name<span style="color:#414868">,</span> <span style="color:#bb9af7">c</span><span style="color:#414868">.</span>city<span style="color:#414868">,</span>                                                       <span style="color:#414868">│</span>
-<span style="color:#414868">│</span> <span style="color:#414868">▾</span> <span style="color:#7dcfff">◈</span> <span style="font-weight:700">shop</span>  <span style="color:#414868">sqlite</span>         <span style="color:#414868">│</span><span style="color:#414868">│</span><span style="color:#414868">  3</span>         <span style="color:#bb9af7">count</span><span style="color:#414868">(</span>o<span style="color:#414868">.</span>id<span style="color:#414868">)</span>  <span style="color:#bb9af7">AS</span> orders<span style="color:#414868">,</span>                                               <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>   <span style="color:#414868">▾</span> <span style="color:#414868">▫</span> Tables  <span style="color:#414868">2</span>          <span style="color:#414868">│</span><span style="color:#414868">│</span><span style="color:#414868">  4</span>         <span style="color:#bb9af7">sum</span><span style="color:#414868">(</span>o<span style="color:#414868">.</span>total<span style="color:#414868">)</span> <span style="color:#bb9af7">AS</span> spent                                                 <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>     <span style="color:#414868">▾</span> <span style="color:#7aa2f7">▦</span> customers        <span style="color:#414868">│</span><span style="color:#414868">│</span><span style="color:#414868">  5</span>  <span style="color:#bb9af7">FROM</span> customers <span style="color:#bb9af7">c</span>                                                             <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>       <span style="color:#414868">▾</span> <span style="color:#414868">▫</span> <span style="color:#bb9af7">Columns</span>  <span style="color:#414868">4</span>     <span style="color:#414868">│</span><span style="color:#414868">│</span><span style="color:#414868">  6</span>  <span style="color:#bb9af7">LEFT</span> <span style="color:#bb9af7">JOIN</span> orders o <span style="color:#bb9af7">ON</span> o<span style="color:#414868">.</span>customer_id <span style="color:#a4daff">=</span> <span style="color:#bb9af7">c</span><span style="color:#414868">.</span>id                                   <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>           <span style="color:#e0af68">⚷</span> id  <span style="color:#414868">INTEGER</span>  <span style="color:#414868">│</span><span style="color:#414868">│</span><span style="color:#414868">  7</span>  <span style="color:#bb9af7">GROUP</span> <span style="color:#bb9af7">BY</span> <span style="color:#bb9af7">c</span><span style="color:#414868">.</span>id                                                                <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>           · name  <span style="color:#414868">TEXT</span>   <span style="color:#414868">│</span><span style="color:#414868">│</span><span style="color:#414868">  8</span>  <span style="color:#bb9af7">ORDER</span> <span style="color:#bb9af7">BY</span> spent <span style="color:#bb9af7">DESC</span> NULLS <span style="color:#bb9af7">LAST</span>                                               <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>           · city  <span style="color:#414868">TEXT</span>   <span style="color:#414868">│</span><span style="color:#414868">│</span>                                                                                  <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>           · since  <span style="color:#414868">DATE</span>  <span style="color:#414868">│</span><span style="color:#414868">│</span>                                                                                  <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>       <span style="color:#414868">▸</span> <span style="color:#414868">▪</span> Indexes        <span style="color:#414868">│</span><span style="color:#414868">│</span>                                                                                  <span style="color:#414868">│</span>
-<span style="color:#414868">│</span>     <span style="color:#414868">▸</span> <span style="color:#7aa2f7">▦</span> orders           <span style="color:#414868">│</span><span style="color:#414868">╰</span><span style="color:#414868">─</span> <span style="color:#7dcfff">◈</span> shop <span style="color:#414868">────────────────────────────────────────────────────────────────────────</span><span style="color:#414868">─╯</span>
-<span style="color:#414868">│</span>   <span style="color:#414868">▸</span> <span style="color:#414868">▪</span> Views              <span style="color:#414868">│</span><span style="color:#bb9af7">╭─</span><span style="color:#15161e;background:#bb9af7;font-weight:700"> 3 </span> <span style="color:#bb9af7;font-weight:700">Results</span> <span style="color:#bb9af7">─────────────────────────────────────────────────────────────────────╮</span>
-<span style="color:#414868">│</span>   <span style="color:#414868">▸</span> <span style="color:#414868">▪</span> Indexes            <span style="color:#414868">│</span><span style="color:#bb9af7">│</span>   <span style="font-weight:700">name           </span>  <span style="color:#bb9af7;font-weight:700">city     </span>  <span style="font-weight:700">orders</span>  <span style="font-weight:700">spent</span>                                      <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>   <span style="color:#414868">▸</span> <span style="color:#414868">▪</span> Triggers           <span style="color:#414868">│</span><span style="color:#bb9af7">│</span><span style="color:#414868">──────────────────────────────────────────────────────────────────────────────────</span><span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span><span style="color:#414868"> 1</span> Grace Hopper     Arlington       2    995                                      <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span><span style="color:#bb9af7;background:#31323c"> 2</span><span style="background:#31323c"> </span><span style="background:#31323c">Alan Turing    </span><span style="background:#31323c">  </span><span style="background:#4c4d56;font-weight:700">Wilmslow </span><span style="background:#31323c">  </span><span style="background:#31323c">     1</span><span style="background:#31323c">  </span><span style="background:#31323c">  310</span><span style="background:#31323c">  </span><span style="background:#31323c">                                    </span><span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span><span style="color:#414868"> 3</span> Ada Lovelace     London          2  155.5                                      <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span><span style="color:#414868"> 4</span> Frances Allen    Peru            1   77.7                                      <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span><span style="color:#414868"> 5</span> Barbara Liskov   Boston          1  42.25                                      <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span><span style="color:#414868"> 6</span> Edsger Dijkstra  <span style="color:#414868;font-style:italic">NULL     </span>       0  <span style="color:#414868;font-style:italic"> NULL</span>                                      <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span>                                                                                  <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span>                                                                                  <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span>                                                                                  <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span>                                                                                  <span style="color:#bb9af7">│</span>
-<span style="color:#414868">│</span>                          <span style="color:#414868">│</span><span style="color:#bb9af7">│</span>                                                                                  <span style="color:#bb9af7">│</span>
-<span style="color:#414868">╰</span><span style="color:#414868">─────────────────────────</span><span style="color:#414868">─╯</span><span style="color:#bb9af7">╰</span><span style="color:#bb9af7">─</span> <span style="color:#9ece6a">✓ </span>6 rows<span style="color:#414868"> · 1 ms</span> <span style="color:#bb9af7">──────────────────────────────────────</span> <span style="color:#414868">2/6 · city text</span>  y<span style="color:#414868"> copy</span> <span style="color:#bb9af7">─╯</span><!-- /screen:terminal --></pre>
-    </div>
-    <div class="themes">
-      <fieldset>
-        <legend>theme</legend>
-        <label><input type="radio" name="theme" value="dark">dark</label>
-        <label><input type="radio" name="theme" value="light">light</label>
-        <label><input type="radio" name="theme" value="terminal">terminal</label>
-      </fieldset>
-      <span class="note" id="theme-note">This is the real interface, drawn by rimor itself.</span>
-    </div>
+<span style="color:#bcc0cc">╰</span><span style="color:#bcc0cc">─────────────────────────</span><span style="color:#bcc0cc">─╯</span><span style="color:#8839ef">╰</span><span style="color:#8839ef">─</span> <span style="color:#40a02b">✓ </span><span style="color:#4c4f69">6 rows</span><span style="color:#7c7f93"> · &lt;1 ms</span> <span style="color:#8839ef">─────────────────────────────────────</span> <span style="color:#7c7f93">2/6 · city text</span>  <span style="color:#5c5f77">y</span><span style="color:#7c7f93"> copy</span> <span style="color:#8839ef">─╯</span><!-- /screen:light --></pre>
+<pre class="screen" data-for="terminal" aria-hidden="true"><!-- screen:terminal --><span style="color:#928374">╭─</span><span style="color:#938a74"> 1 </span> Explorer <span style="color:#928374">────────────╮</span><span style="color:#928374">╭─</span><span style="color:#938a74"> 2 </span> <span style="color:#689d6a">●</span> <span style="color:#938a74">orders.sql</span><span style="color:#928374"> ─ </span><span style="color:#689d6a">●</span> <span style="font-weight:700">best-customers.sql</span> <span style="color:#928374">─────────────────────────────────────────╮</span>
+<span style="color:#928374">│</span>   <span style="color:#b16286">+</span> <span style="color:#b16286">New connection</span>       <span style="color:#928374">│</span><span style="color:#928374">│</span><span style="color:#938a74">  1</span>  <span style="color:#938a74;font-style:italic">-- Best customers this month</span>                                                 <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#928374">│</span><span style="color:#938a74">  2</span>  <span style="color:#b16286">SELECT</span> <span style="color:#b16286">c</span><span style="color:#938a74">.</span>name<span style="color:#938a74">,</span> <span style="color:#b16286">c</span><span style="color:#938a74">.</span>city<span style="color:#938a74">,</span>                                                       <span style="color:#928374">│</span>
+<span style="color:#928374">│</span> <span style="color:#938a74">▾</span> <span style="color:#689d6a">◈</span> <span style="font-weight:700">shop</span>  <span style="color:#938a74">sqlite</span>         <span style="color:#928374">│</span><span style="color:#928374">│</span><span style="color:#938a74">  3</span>         <span style="color:#b16286">count</span><span style="color:#938a74">(</span>o<span style="color:#938a74">.</span>id<span style="color:#938a74">)</span>  <span style="color:#b16286">AS</span> orders<span style="color:#938a74">,</span>                                               <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>   <span style="color:#938a74">▾</span> <span style="color:#938a74">▫</span> Tables  <span style="color:#938a74">2</span>          <span style="color:#928374">│</span><span style="color:#928374">│</span><span style="color:#938a74">  4</span>         <span style="color:#b16286">sum</span><span style="color:#938a74">(</span>o<span style="color:#938a74">.</span>total<span style="color:#938a74">)</span> <span style="color:#b16286">AS</span> spent                                                 <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>     <span style="color:#938a74">▾</span> <span style="color:#458588">▦</span> customers        <span style="color:#928374">│</span><span style="color:#928374">│</span><span style="color:#938a74">  5</span>  <span style="color:#b16286">FROM</span> customers <span style="color:#b16286">c</span>                                                             <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>       <span style="color:#938a74">▾</span> <span style="color:#938a74">▫</span> <span style="color:#b16286">Columns</span>  <span style="color:#938a74">4</span>     <span style="color:#928374">│</span><span style="color:#928374">│</span><span style="color:#938a74">  6</span>  <span style="color:#b16286">LEFT</span> <span style="color:#b16286">JOIN</span> orders o <span style="color:#b16286">ON</span> o<span style="color:#938a74">.</span>customer_id <span style="color:#8ec07c">=</span> <span style="color:#b16286">c</span><span style="color:#938a74">.</span>id                                   <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>           <span style="color:#d79921">⚷</span> id  <span style="color:#938a74">INTEGER</span>  <span style="color:#928374">│</span><span style="color:#928374">│</span><span style="color:#938a74">  7</span>  <span style="color:#b16286">GROUP</span> <span style="color:#b16286">BY</span> <span style="color:#b16286">c</span><span style="color:#938a74">.</span>id                                                                <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>           · name  <span style="color:#938a74">TEXT</span>   <span style="color:#928374">│</span><span style="color:#928374">│</span><span style="color:#938a74">  8</span>  <span style="color:#b16286">ORDER</span> <span style="color:#b16286">BY</span> spent <span style="color:#b16286">DESC</span> NULLS <span style="color:#b16286">LAST</span>                                               <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>           · city  <span style="color:#938a74">TEXT</span>   <span style="color:#928374">│</span><span style="color:#928374">│</span>                                                                                  <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>           · since  <span style="color:#938a74">DATE</span>  <span style="color:#928374">│</span><span style="color:#928374">│</span>                                                                                  <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>       <span style="color:#938a74">▸</span> <span style="color:#938a74">▪</span> Indexes        <span style="color:#928374">│</span><span style="color:#928374">│</span>                                                                                  <span style="color:#928374">│</span>
+<span style="color:#928374">│</span>     <span style="color:#938a74">▸</span> <span style="color:#458588">▦</span> orders           <span style="color:#928374">│</span><span style="color:#928374">╰</span><span style="color:#928374">─</span> <span style="color:#689d6a">◈</span> shop <span style="color:#928374">────────────────────────────────────────────────────────────────────────</span><span style="color:#928374">─╯</span>
+<span style="color:#928374">│</span>   <span style="color:#938a74">▸</span> <span style="color:#938a74">▪</span> Views              <span style="color:#928374">│</span><span style="color:#b16286">╭─</span><span style="color:#282828;background:#b16286;font-weight:700"> 3 </span> <span style="color:#b16286;font-weight:700">Results</span> <span style="color:#b16286">─────────────────────────────────────────────────────────────────────╮</span>
+<span style="color:#928374">│</span>   <span style="color:#938a74">▸</span> <span style="color:#938a74">▪</span> Indexes            <span style="color:#928374">│</span><span style="color:#b16286">│</span>   <span style="font-weight:700">name           </span>  <span style="color:#b16286;font-weight:700">city     </span>  <span style="font-weight:700">orders</span>  <span style="font-weight:700">spent</span>                                      <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>   <span style="color:#938a74">▸</span> <span style="color:#938a74">▪</span> Triggers           <span style="color:#928374">│</span><span style="color:#b16286">│</span><span style="color:#928374">──────────────────────────────────────────────────────────────────────────────────</span><span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span><span style="color:#938a74"> 1</span> Grace Hopper     Arlington       2    995                                      <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span><span style="color:#b16286;background:#3e3e3e"> 2</span><span style="background:#3e3e3e"> </span><span style="background:#3e3e3e">Alan Turing    </span><span style="background:#3e3e3e">  </span><span style="background:#575757;font-weight:700">Wilmslow </span><span style="background:#3e3e3e">  </span><span style="background:#3e3e3e">     1</span><span style="background:#3e3e3e">  </span><span style="background:#3e3e3e">  310</span><span style="background:#3e3e3e">  </span><span style="background:#3e3e3e">                                    </span><span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span><span style="color:#938a74"> 3</span> Ada Lovelace     London          2  155.5                                      <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span><span style="color:#938a74"> 4</span> Frances Allen    Peru            1   77.7                                      <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span><span style="color:#938a74"> 5</span> Barbara Liskov   Boston          1  42.25                                      <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span><span style="color:#938a74"> 6</span> Edsger Dijkstra  <span style="color:#938a74;font-style:italic">NULL     </span>       0  <span style="color:#938a74;font-style:italic"> NULL</span>                                      <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
+<span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
+<span style="color:#928374">╰</span><span style="color:#928374">─────────────────────────</span><span style="color:#928374">─╯</span><span style="color:#b16286">╰</span><span style="color:#b16286">─</span> <span style="color:#98971a">✓ </span>6 rows<span style="color:#938a74"> · &lt;1 ms</span> <span style="color:#b16286">─────────────────────────────────────</span> <span style="color:#938a74">2/6 · city text</span>  y<span style="color:#938a74"> copy</span> <span style="color:#b16286">─╯</span><!-- /screen:terminal --></pre>
+  </div>
+  <div class="wrap themes">
+    <fieldset>
+      <legend>theme</legend>
+      <label><input type="radio" name="theme" value="dark">dark</label>
+      <label><input type="radio" name="theme" value="light">light</label>
+      <label><input type="radio" name="theme" value="terminal">terminal</label>
+    </fieldset>
+    <span class="note" id="theme-note">This is the real interface, drawn by rimor itself.</span>
   </div>
 
-  <section class="column" aria-labelledby="what">
+  <section class="wrap" aria-labelledby="what">
     <h2 id="what">What it does</h2>
-    <dl>
-      <dt>Explorer</dt>
-      <dd>Your connections and their catalog as a tree: databases, schemas,
-        tables, views, functions, indexes and columns with their types. Each
-        level loads when you open it, and empty schemas stay out of the way.</dd>
-      <dt>Query tabs</dt>
-      <dd>Each tab knows where it runs, a connection and a database, and shows
-        it at the bottom. Open a tab from anything in the tree and it starts
-        there. Tabs save to <code>.sql</code> files, and unsaved work is still
-        there the next time you start.</dd>
-      <dt>Editor</dt>
-      <dd>Syntax highlighting in each database's own dialect, selection,
-        undo, clipboard and indentation that follows the line above.</dd>
-      <dt>Results</dt>
-      <dd>Rows appear within milliseconds and keep streaming in the background,
-        stored compactly enough for millions of them. Scroll by row and by
-        column; <kbd>esc</kbd> stops fetching and keeps what arrived.</dd>
-      <dt>Errors</dt>
-      <dd>The database's own message and code, with the failing line of your
-        SQL and a caret where the database points.</dd>
-      <dt>Sessions</dt>
-      <dd>Every tab runs on its own connection, so <code>USE</code>, temp
-        tables and open transactions carry over from one run to the next.</dd>
-      <dt>Layout</dt>
-      <dd>Drag the borders between panes, or resize from the keyboard. Any pane
-        goes full screen with <kbd>alt+f</kbd>.</dd>
-      <dt>Themes</dt>
-      <dd>Dark, light, or your terminal's own colours. On Omarchy rimor follows
-        the system theme; elsewhere it matches your terminal's background.</dd>
-      <dt>Keys</dt>
-      <dd>Everything works from the keyboard and can be remapped. Press
-        <kbd>ctrl+g</kbd> to see every shortcut, in terminals that keep
-        <kbd>alt</kbd> for themselves too.</dd>
+    <dl class="features">
+      <div>
+        <dt>Explorer</dt>
+        <dd>Your connections and their catalog as a tree: databases, schemas,
+          tables, views, functions, indexes and columns with their types. Each
+          level loads when you open it, and empty schemas stay out of the way.</dd>
+      </div>
+      <div>
+        <dt>Query tabs</dt>
+        <dd>Each tab knows where it runs, a connection and a database, and shows
+          it at the bottom. Open a tab from anything in the tree and it starts
+          there. Tabs save to <code>.sql</code> files, and unsaved work is still
+          there the next time you start.</dd>
+      </div>
+      <div>
+        <dt>Results</dt>
+        <dd>Rows appear within milliseconds and keep streaming in the
+          background, stored compactly enough for millions of them. Scroll by
+          row and by column; <kbd>esc</kbd> stops fetching and keeps what
+          arrived.</dd>
+      </div>
+      <div>
+        <dt>Errors</dt>
+        <dd>The database's own message and code, with the failing line of your
+          SQL and a caret where the database points.</dd>
+      </div>
+      <div>
+        <dt>Editor</dt>
+        <dd>Syntax highlighting in each database's own dialect, selection,
+          undo, clipboard and indentation that follows the line above.</dd>
+      </div>
+      <div>
+        <dt>Sessions</dt>
+        <dd>Every tab runs on its own connection, so <code>USE</code>, temp
+          tables and open transactions carry over from one run to the next.</dd>
+      </div>
+      <div>
+        <dt>Themes</dt>
+        <dd>Dark, light, or your terminal's own colours. On Omarchy rimor
+          follows the system theme; elsewhere it matches your terminal's
+          background.</dd>
+      </div>
+      <div>
+        <dt>Layout and keys</dt>
+        <dd>Drag the borders between panes, or resize from the keyboard; any
+          pane goes full screen with <kbd>alt+f</kbd>. Every shortcut can be
+          remapped, and <kbd>ctrl+g</kbd> lists them all.</dd>
+      </div>
     </dl>
   </section>
 
-  <section class="column" aria-labelledby="install">
+  <section class="wrap" aria-labelledby="install">
     <h2 id="install">Install</h2>
-    <p>rimor is a single binary with no other dependencies, for Linux, macOS
-      and Windows. With Go 1.27 or newer:</p>
+    <div class="columns">
+      <div>
+        <h3>With Go</h3>
+        <p>A single binary with no other dependencies, for Linux, macOS and
+          Windows. Needs Go 1.27 or newer.</p>
 <pre class="block"><span class="prompt">$ </span>go install rimor.dev/cmd/rimor@latest
 <span class="prompt">$ </span>rimor</pre>
-    <p>Or build it from a checkout:</p>
+      </div>
+      <div>
+        <h3>From source</h3>
+        <p>Clone the repository and build the command; the binary lands in the
+          current folder.</p>
 <pre class="block"><span class="prompt">$ </span>git clone https://github.com/alchemy/rimor
 <span class="prompt">$ </span>cd rimor &amp;&amp; go build ./cmd/rimor</pre>
-    <p class="quiet">Press <kbd>a</kbd> in the explorer to add a connection.
+      </div>
+    </div>
+    <p class="after">Press <kbd>a</kbd> in the explorer to add a connection.
       Settings live in <code>~/.config/rimor/config.toml</code>, written with
       every default on first run.</p>
   </section>
 </main>
 
-<footer class="column">
+<footer class="wrap">
   MIT licence. <a href="https://github.com/alchemy/rimor">Source on GitHub</a>.
 </footer>
 
@@ -394,7 +439,7 @@ footer.column {
   var notes = {
     dark: "This is the real interface, drawn by rimor itself.",
     light: "This is the real interface, drawn by rimor itself.",
-    terminal: "terminal uses your terminal's own colours; shown here with Tokyo Night."
+    terminal: "terminal uses your terminal's own colours; shown here with Gruvbox."
   };
   var stored = null;
   try { stored = localStorage.getItem("rimor-theme"); } catch (e) {}
