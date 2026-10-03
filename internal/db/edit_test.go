@@ -234,3 +234,34 @@ func TestCheckReadOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestEditSQLServerISJSON(t *testing.T) {
+	dsn := serverDSN(t, "RIMOR_TEST_SQLSERVER")
+	ctx := context.Background()
+	conn := pgSession(t, Config{Driver: SQLServer, DSN: dsn})
+	mustExec(t, conn,
+		`IF OBJECT_ID('dbo.rimor_json_test') IS NOT NULL DROP TABLE dbo.rimor_json_test`,
+		`CREATE TABLE dbo.rimor_json_test (id int PRIMARY KEY,
+			doc nvarchar(max) CONSTRAINT rimor_doc_json CHECK (ISJSON(doc) = 1),
+			other nvarchar(max), plain nvarchar(100),
+			CONSTRAINT rimor_other_json CHECK (ISJSON(other) > 0 AND len(other) < 4000))`,
+		`INSERT INTO dbo.rimor_json_test VALUES (1, N'{"a":1}', N'[1,2]', N'x')`,
+	)
+	defer mustExec(t, conn, `DROP TABLE dbo.rimor_json_test`)
+
+	o, err := FindOrigin(ctx, conn, SQLServer, "SELECT id, doc, other, plain FROM dbo.rimor_json_test", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for col, want := range map[int]bool{0: false, 1: true, 2: true, 3: false} {
+		if got := o.IsJSON(col); got != want {
+			t.Errorf("column %d: IsJSON = %v, want %v", col, got, want)
+		}
+	}
+	// A disabled check does not count.
+	mustExec(t, conn, `ALTER TABLE dbo.rimor_json_test NOCHECK CONSTRAINT rimor_doc_json`)
+	o, _ = FindOrigin(ctx, conn, SQLServer, "SELECT id, doc FROM dbo.rimor_json_test", 2)
+	if o.IsJSON(1) {
+		t.Error("disabled ISJSON check still counted")
+	}
+}

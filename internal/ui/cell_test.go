@@ -117,7 +117,8 @@ func TestCellEditPostgres(t *testing.T) {
 	if v := dbValue(t, raw, "SELECT note FROM cell_items WHERE id = 1"); v.String != "first\nsecond" {
 		t.Errorf("note = %q", v.String)
 	}
-	d.key("enter", "ctrl+n", "enter")
+	// The note has two lines now: a multi-line value saves with ctrl+s.
+	d.key("enter", "ctrl+n", "ctrl+s")
 	if v := dbValue(t, raw, "SELECT note FROM cell_items WHERE id = 1"); v.Valid {
 		t.Errorf("note not NULL: %q", v.String)
 	}

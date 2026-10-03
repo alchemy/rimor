@@ -1,10 +1,15 @@
 package ui
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 
@@ -69,29 +74,115 @@ type cellPopup struct {
 	original string  // the editor text editing started from
 	null     bool    // the new value is NULL
 	nullAt   int     // editor version when NULL was chosen
+
+	// json is a JSON column: highlighted, formatted with ctrl+f and
+	// validated before saving. normalized types (jsonb, SQL Server's json)
+	// store their own form, so they open pretty-printed; json and text
+	// columns keep the text as written.
+	json, normalized bool
+	// multiline values take enter as a new line and save with ctrl+s.
+	multiline bool
+	maxWidth  int
+	maxHeight int
+}
+
+// jsonColumn reports whether a column holds JSON, and whether the
+// database stores it in its own normalised form.
+func jsonColumn(d db.Driver, typ string) (isJSON, normalized bool) {
+	switch strings.ToUpper(typ) {
+	case "JSONB":
+		return true, true
+	case "JSON":
+		return true, d == db.SQLServer // SQL Server 2025's json is binary
+	}
+	return false, false
+}
+
+// prettyJSON indents valid JSON; anything else comes back unchanged.
+func prettyJSON(s string) string {
+	var b bytes.Buffer
+	if json.Indent(&b, []byte(s), "", "  ") != nil {
+		return s
+	}
+	return b.String()
+}
+
+// jsonError describes invalid JSON with the line and column of the fault.
+func jsonError(s string) (msg string, line, col int, ok bool) {
+	var v any
+	err := json.Unmarshal([]byte(s), &v)
+	if err == nil {
+		return "", 0, 0, true
+	}
+	offset := len(s)
+	var syn *json.SyntaxError
+	if errors.As(err, &syn) {
+		offset = int(syn.Offset)
+	}
+	offset = min(max(offset, 0), len(s))
+	before := s[:offset]
+	line = strings.Count(before, "\n")
+	col = utf8.RuneCountInString(before[strings.LastIndexByte(before, '\n')+1:])
+	reason := strings.TrimPrefix(err.Error(), "json: ")
+	if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(reason, "unexpected end") {
+		reason = "the JSON ends too early"
+	}
+	return fmt.Sprintf("Invalid JSON at line %d, column %d: %s.", line+1, col+1, reason), line, col, false
 }
 
 func newCellPopup(t *tab, row, col, maxWidth int) *cellPopup {
 	set := t.run.res.Rows
 	p := &cellPopup{tab: t, run: t.run, row: row, col: col, column: set.Columns()[col]}
+	p.json, p.normalized = jsonColumn(t.ctx.conn.cfg().Driver, p.column.Type)
 	p.ed = editor.New(editorTheme)
 	p.ed.NoLineNumbers = true
 	p.ed.ReadOnly = true
+	if p.json {
+		p.ed.SetLanguage(editor.JSON)
+	}
 	v := set.Cell(row, col)
 	if v.Null {
 		p.ed.Placeholder = "NULL"
 	} else {
-		p.ed.SetText(v.Text)
+		text := v.Text
+		if p.normalized {
+			text = prettyJSON(text)
+		}
+		p.ed.SetText(text)
 	}
+	p.multiline = p.json || strings.Contains(v.Text, "\n")
 	p.ed.Focus()
 	p.setWidth(maxWidth)
 	p.ed.SelectAll()
 	return p
 }
 
+// popupChrome is the popup's rows around the editor: borders, the blank
+// rows and up to four rows of notes.
+const popupChrome = 9
+
 func (p *cellPopup) setWidth(maxWidth int) {
+	p.maxWidth = maxWidth
 	p.width = min(84, maxWidth)
-	p.ed.SetSize(p.width-6, min(max(p.ed.LineCount(), 3), 12))
+	if p.multiline {
+		p.width = min(max(84, maxWidth*4/5), maxWidth)
+	}
+	p.size()
+}
+
+// setHeight bounds the popup by the screen; multi-line values may take
+// most of it.
+func (p *cellPopup) setHeight(maxHeight int) {
+	p.maxHeight = maxHeight
+	p.size()
+}
+
+func (p *cellPopup) size() {
+	limit := 12
+	if p.multiline && p.maxHeight > 0 {
+		limit = max(p.maxHeight*4/5-popupChrome, 3)
+	}
+	p.ed.SetSize(p.width-6, min(max(p.ed.LineCount(), 3), limit))
 }
 
 // prepareCell checks whether a cell can be edited and, if so, loads what
@@ -170,6 +261,13 @@ func (p *cellPopup) ready(msg cellReadyMsg) {
 	}
 	p.phase, p.cell, p.old = cellEditing, msg.cell, msg.current
 	p.ed.ReadOnly = false
+	if !p.json && msg.cell.Origin.IsJSON(p.col) {
+		// A text column kept to JSON by an ISJSON check: like PostgreSQL's
+		// json, highlighted and validated, stored as written.
+		p.json, p.normalized, p.multiline = true, false, true
+		p.ed.SetLanguage(editor.JSON)
+		p.setWidth(p.maxWidth)
+	}
 	if msg.current == nil {
 		p.ed.SetText("")
 		p.null, p.nullAt = true, p.ed.Version()
@@ -177,11 +275,16 @@ func (p *cellPopup) ready(msg cellReadyMsg) {
 	} else {
 		// The database's own text: it may differ from the grid's display,
 		// e.g. a time zone or all digits of a number.
-		p.ed.SetText(*msg.current)
-		p.original = *msg.current
+		text := *msg.current
+		if p.normalized {
+			text = prettyJSON(text) // the database keeps its own form anyway
+		}
+		p.ed.SetText(text)
+		p.original = text
+		p.multiline = p.multiline || strings.Contains(text, "\n")
 	}
 	p.syncPlaceholder()
-	p.setWidth(p.width) // the text may have more lines now
+	p.size() // the text may have more lines now
 	p.ed.SelectAll()
 }
 
@@ -212,6 +315,13 @@ func (p *cellPopup) save() tea.Cmd {
 	if !p.changed() {
 		return closeModal
 	}
+	if p.json && !p.null {
+		if msg, line, col, ok := jsonError(p.ed.Text()); !ok {
+			p.err = msg
+			p.ed.SetCursorPosition(line, col) // where the JSON goes wrong
+			return nil
+		}
+	}
 	p.phase, p.err = cellSaving, ""
 	cell, old, value, session := *p.cell, p.old, p.value(), p.tab.session
 	return func() tea.Msg {
@@ -235,14 +345,28 @@ func (p *cellPopup) Update(msg tea.Msg) (modal, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		return p, closeModal
-	case "enter":
+	case "ctrl+s":
 		if p.phase == cellEditing {
 			return p, p.save()
 		}
-		if p.phase == cellSaving {
-			return p, nil
+		return p, nil
+	case "ctrl+f":
+		if p.json {
+			p.format()
 		}
-		return p, closeModal
+		return p, nil
+	case "enter":
+		switch {
+		case p.phase == cellEditing && p.multiline:
+			// A new line, like alt+enter; ctrl+s saves.
+		case p.phase == cellEditing:
+			return p, p.save()
+		case p.phase == cellSaving:
+			return p, nil
+		default:
+			return p, closeModal
+		}
+		fallthrough
 	case "alt+enter":
 		if p.phase == cellEditing {
 			cmd := p.ed.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -265,6 +389,29 @@ func (p *cellPopup) Update(msg tea.Msg) (modal, tea.Cmd) {
 	cmd := p.ed.Update(key)
 	p.afterEdit()
 	return p, cmd
+}
+
+// format pretty-prints the JSON being shown or edited.
+func (p *cellPopup) format() {
+	if p.null {
+		return
+	}
+	text := p.ed.Text()
+	if msg, line, col, ok := jsonError(text); !ok {
+		p.err = msg
+		p.ed.SetCursorPosition(line, col)
+		return
+	}
+	if pretty := prettyJSON(text); pretty != text {
+		readOnly := p.ed.ReadOnly
+		p.ed.ReadOnly = false // formatting a value being viewed changes only the view
+		p.ed.SelectAll()
+		p.ed.Update(tea.PasteMsg{Content: pretty}) // one undo step
+		p.ed.ReadOnly = readOnly
+		p.ed.SetCursorPosition(0, 0)
+		p.size()
+	}
+	p.err = ""
 }
 
 // afterEdit drops NULL once text is typed.
@@ -321,7 +468,15 @@ func (p *cellPopup) View(int) string {
 		title += " · " + strings.ToLower(p.column.Type)
 	}
 	footer := hints("^c", "copy", "esc", "close")
-	if p.phase == cellEditing {
+	if p.json {
+		footer = hints("^f", "format", "^c", "copy", "esc", "close")
+	}
+	switch {
+	case p.phase == cellEditing && p.json:
+		footer = hints("^s", "save", "^f", "format", "^n", "NULL", "esc", "cancel")
+	case p.phase == cellEditing && p.multiline:
+		footer = hints("^s", "save", "^n", "NULL", "esc", "cancel")
+	case p.phase == cellEditing:
 		footer = hints("⏎", "save", "alt+⏎", "new line", "^n", "NULL", "esc", "cancel")
 	}
 	pn := pane{title: title, footer: footer}

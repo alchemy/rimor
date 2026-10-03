@@ -232,3 +232,21 @@ func TestReadOnly(t *testing.T) {
 		t.Errorf("gutter still shown: %q", ansi.Strip(row))
 	}
 }
+
+func TestHighlightJSON(t *testing.T) {
+	lines := [][]rune{[]rune(`{"name": "bolt", "price": 1.5,`), []rune(`  "tags": [true, null]}`)}
+	cls := highlight(lexerFor(JSON), lines)
+	at := func(row int, s string) class { return cls[row][strings.Index(string(lines[row]), s)] }
+	for _, c := range []struct {
+		row  int
+		s    string
+		want class
+	}{
+		{0, `"name"`, clsFunction}, {0, `"bolt"`, clsString}, {0, "1.5", clsNumber},
+		{1, "true", clsKeyword}, {1, "null", clsKeyword}, {0, "{", clsPunctuation},
+	} {
+		if got := at(c.row, c.s); got != c.want {
+			t.Errorf("%s: class %d, want %d", c.s, got, c.want)
+		}
+	}
+}

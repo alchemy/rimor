@@ -43,6 +43,9 @@ type Origin struct {
 	// fixed marks source columns the database computes (generated,
 	// computed or identity columns).
 	fixed []bool
+	// json marks text columns an ISJSON check constraint keeps to JSON
+	// (SQL Server before its json type); they edit like PostgreSQL's json.
+	json []bool
 
 	key []int // result columns of the key
 }
@@ -305,6 +308,9 @@ func describeSQLServer(ctx context.Context, conn *sql.Conn, query string, column
 	if err := singleUse(query, o.Table); err != nil {
 		return nil, err
 	}
+	if err := o.findISJSON(ctx, conn); err != nil {
+		return nil, err
+	}
 	if hiddenKey || len(o.key) == 0 {
 		if len(o.key) == 0 && !hiddenKey {
 			return nil, notEditable("%s has no primary key or unique key, so rimor cannot find a row again.", o.Table)
@@ -389,7 +395,41 @@ func newOrigin(d Driver, columns int) *Origin {
 		driver:  d,
 		columns: make([]string, columns), types: make([]string, columns),
 		names: make([]string, columns), fixed: make([]bool, columns),
+		json: make([]bool, columns),
 	}
+}
+
+// IsJSON reports whether a text column is kept to JSON by an ISJSON check
+// constraint, the usual way to store JSON before SQL Server's json type.
+func (o *Origin) IsJSON(col int) bool { return o.json[col] }
+
+// findISJSON marks the columns covered by an enabled ISJSON check. SQL
+// Server stores constraint text normalised, as (isjson([doc])=(1)) or,
+// with a type argument, isjson([doc],object), so matching "isjson([name]"
+// finds both. One catalog query per result.
+func (o *Origin) findISJSON(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT DISTINCT c.name
+		FROM sys.check_constraints cc
+		JOIN sys.columns c ON c.object_id = cc.parent_object_id
+		WHERE cc.parent_object_id = OBJECT_ID(@p1) AND cc.is_disabled = 0
+		  AND CHARINDEX(LOWER(N'isjson(' + QUOTENAME(c.name)), LOWER(cc.definition)) > 0`, o.table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		for i, n := range o.names {
+			if n == name && !o.fixed[i] {
+				o.json[i] = true
+			}
+		}
+	}
+	return rows.Err()
 }
 
 func mssqlQuote(name string) string { return "[" + strings.ReplaceAll(name, "]", "]]") + "]" }

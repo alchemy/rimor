@@ -230,6 +230,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		p := newCellPopup(msg.tab, msg.row, msg.col, m.dialogWidth())
+		p.setHeight(m.dialogHeight())
 		m.modal = p
 		return m.prepareCell(p)
 	case cellReadyMsg:

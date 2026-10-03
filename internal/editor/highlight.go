@@ -74,6 +74,7 @@ const (
 	SQL        Language = "sql"
 	PostgreSQL Language = "postgres"
 	TSQL       Language = "tsql"
+	JSON       Language = "json"
 )
 
 func lexerFor(lang Language) chroma.Lexer {
@@ -98,7 +99,7 @@ func classify(t chroma.TokenType) class {
 		return clsQuoted
 	case t.InSubCategory(chroma.NameVariable):
 		return clsVariable
-	case t == chroma.NameBuiltin, t.InSubCategory(chroma.NameFunction):
+	case t == chroma.NameBuiltin, t.InSubCategory(chroma.NameFunction), t == chroma.NameTag: // NameTag: JSON keys
 		return clsFunction
 	case t.InSubCategory(chroma.LiteralString):
 		return clsString

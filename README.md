@@ -114,12 +114,25 @@ plain Unicode symbols. See `icons` in [Configuration](#configuration).
 it. When rimor can tell which table row the cell comes from, the value can
 be changed in place:
 
-| Key | |
-|---|---|
-| `enter` | Save: rimor runs the `UPDATE` shown below the value |
-| `alt+enter` | New line |
-| `ctrl+n` | Set NULL |
-| `esc` | Close without saving |
+| Key | Single-line value | Multi-line value or JSON |
+|---|---|---|
+| `enter` | save | new line |
+| `ctrl+s` | save | save |
+| `alt+enter` | new line | new line |
+| `ctrl+f` | | format JSON |
+| `ctrl+n` | set NULL | set NULL |
+| `esc` | close without saving | close without saving |
+
+Saving runs the `UPDATE` shown below the value.
+
+**JSON** columns (`json` and `jsonb` on PostgreSQL; on SQL Server the 2025
+`json` type, and text columns with an enabled `ISJSON` check constraint)
+open highlighted in a larger editor, and are checked before saving:
+invalid JSON is never sent, and the cursor goes to the fault. `jsonb` and
+SQL Server's `json` open pretty-printed, since the database stores its own
+form anyway; PostgreSQL's `json` and SQL Server text columns keep text
+exactly as written, so they open as stored and `ctrl+f` formats them on
+request.
 
 Editing needs a result from a single table that includes the table's
 primary key, or a unique key on non-null columns. Key columns and
