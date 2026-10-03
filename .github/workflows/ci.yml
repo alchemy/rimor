@@ -2,6 +2,8 @@ name: ci
 
 on:
   push:
+    # Branches only: a version tag runs the tests in release.yml.
+    branches: ["**"]
     paths-ignore: ["site/**"]
   pull_request:
     paths-ignore: ["site/**"]
@@ -14,7 +16,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -32,7 +34,7 @@ jobs:
       matrix:
         target: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod

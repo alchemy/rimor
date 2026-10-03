@@ -1,0 +1,157 @@
+# Release Workflow
+#
+# Pushing a version tag (v1.2.3, or v1.2.3-rc.1 for a prerelease) tests that
+# commit, builds rimor for Linux, macOS and Windows on amd64 and arm64, and
+# publishes a GitHub Release with the archives and their checksums. A full
+# release is then packaged for the AUR by aur-publish.yml.
+#
+# Nothing else triggers it: pushes to branches run ci.yml only.
+#
+# Notes on the builds:
+# - rimor is pure Go, its SQLite driver included, so every target is cross-
+#   compiled on one Linux runner with CGO_ENABLED=0 and has no runtime
+#   dependencies.
+# - The binaries are not code-signed: macOS Gatekeeper and Windows
+#   SmartScreen warn about them. The release notes say how to get past that.
+#
+# Setup Requirements:
+# - Settings -> Actions -> General -> Workflow permissions must allow
+#   "Read and write permissions", or the release cannot be created.
+# - For the AUR, the secrets listed in aur-publish.yml.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - v[0-9]*
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      # Database server tests skip without RIMOR_TEST_* settings; the SQLite
+      # ones run.
+      - run: go test ./...
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build and archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          TAG: ${{ github.ref_name }}
+        run: |
+          name="rimor-${TAG}-${GOOS}-${GOARCH}"
+          bin=rimor
+          if [ "$GOOS" = windows ]; then bin=rimor.exe; fi
+
+          mkdir -p "stage/${name}" dist
+          go build -trimpath -ldflags "-s -w -X main.version=${TAG}" -o "stage/${name}/${bin}" ./cmd/rimor
+          cp LICENSE README.md "stage/${name}/"
+
+          # Files at the top of the archive, as the AUR package expects.
+          if [ "$GOOS" = windows ]; then
+            (cd "stage/${name}" && zip -q "../../dist/${name}.zip" ./*)
+            archive="${name}.zip"
+          else
+            tar -C "stage/${name}" -czf "dist/${name}.tar.gz" .
+            archive="${name}.tar.gz"
+          fi
+          (cd dist && sha256sum "$archive" > "${archive}.sha256")
+          cat "dist/${archive}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      prerelease: ${{ steps.publish.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # One checksum file for everything, beside the per-archive ones the
+          # AUR packaging reads.
+          (cd dist && cat ./*.sha256 | sort -k2 > checksums.txt)
+
+          # A tag with a hyphen (v0.2.0-rc.1) is a prerelease: published on
+          # GitHub, not packaged for the AUR.
+          prerelease=false
+          flags=()
+          case "$TAG" in *-*) prerelease=true; flags+=(--prerelease) ;; esac
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+
+          notes=$(mktemp)
+          {
+            echo "## Install"
+            echo
+            echo '```sh'
+            echo "go install rimor.dev/cmd/rimor@${TAG}"
+            echo '```'
+            echo
+            echo "Or download the archive for your system below. On Arch Linux:"
+            echo "\`yay -S rimor\` (built from source) or \`yay -S rimor-bin\`."
+            echo
+            echo "The binaries are not signed. On macOS, after unpacking:"
+            echo "\`xattr -d com.apple.quarantine rimor\`. On Windows, SmartScreen"
+            echo "may ask you to confirm with *More info → Run anyway*."
+            echo
+          } > "$notes"
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file "$notes" \
+            --generate-notes \
+            --verify-tag \
+            "${flags[@]}" \
+            dist/*
+
+  aur:
+    name: AUR
+    needs: release
+    if: needs.release.outputs.prerelease == 'false'
+    uses: ./.github/workflows/aur-publish.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

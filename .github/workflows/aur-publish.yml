@@ -1,0 +1,282 @@
+# AUR Publish Workflow
+#
+# Pushes packaging/aur/<pkgname>/ to the AUR whenever a release is published,
+# once per package:
+#
+#   rimor-bin  the Linux archives that release carries, pinned by their checksums
+#   rimor      the same release compiled from its tag tarball
+#
+# Both are published from the same run so they cannot drift apart: a release
+# that reaches one reaches the other, at the same version.
+#
+# Setup Requirements:
+# 1. An SSH key whose public half is on an AUR account that co-maintains
+#    both packages (AUR accepts several keys, one per line). A package that
+#    does not exist yet is created by the first push -- cloning it beforehand
+#    gives an empty repository rather than an error.
+# 2. Repository secrets:
+#    - AUR_SSH_PRIVATE_KEY: the private half of that key
+#    - AUR_USERNAME:        name for the AUR commit author
+#    - AUR_EMAIL:           email for the AUR commit author
+#
+# Workflow Triggers:
+# - Called by the Release workflow once it has published a release.
+# - Manual dispatch against a tag, for re-publishing packaging changes that
+#   do not warrant a new upstream version.
+#
+# Release calls this directly rather than chaining on an event. Every attempt
+# to infer which tag to package from an event payload has been wrong: the
+# `release: published` event never fires because release.yml creates the
+# release with GITHUB_TOKEN, and a workflow_run payload names the branch the
+# run started from -- which, now that Release tags the version itself, is
+# "main". Being handed the tag removes the guessing.
+#
+# Everything runs in an Arch container rather than through a third-party
+# action, because this job holds a key with write access to the AUR package
+# and the work it does is a dozen lines of shell.
+
+name: AUR Publish
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to publish packaging for (e.g. v0.6.0)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish packaging for (e.g. v0.6.0)"
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: ${{ matrix.pkgname }}
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    strategy:
+      # Independent AUR repositories, so one failing is no reason to abandon
+      # the other -- and knowing which of the two broke is worth a second run.
+      fail-fast: false
+      matrix:
+        pkgname: [rimor-bin, rimor]
+
+    steps:
+      - name: Install container dependencies
+        run: pacman -Sy --noconfirm --needed git openssh jq
+
+      - name: Resolve the release being packaged
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.tag }}"
+          if [ -z "$tag" ]; then echo "no tag to publish" >&2; exit 1; fi
+
+          # Prereleases are for trying things out; the AUR is not. Read it from
+          # the release rather than guessing at the tag's shape.
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}"
+          prerelease=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "$api" | jq -r '.prerelease')
+          if [ "$prerelease" != "false" ]; then
+            echo "${tag} is a prerelease (or has no release); not publishing." >&2
+            exit 1
+          fi
+
+          # AUR pkgver may not contain a hyphen and conventionally carries no
+          # leading v, so v0.6.0 becomes 0.6.0.
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "pkgver=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      # The packaging templates, which are a property of the default branch
+      # rather than of any tag.
+      #
+      # This used to check out the tag, on the reasoning that a release should
+      # be packaged as it was released. But nothing here reads the release's
+      # own sources -- both checksums come from URLs -- so the only thing the
+      # tag supplied was packaging/aur itself, frozen as of that tag. That
+      # contradicted this workflow's own documented second use, re-publishing
+      # packaging changes against an existing tag: the changes could never be
+      # picked up. It also broke the moment packaging/aur was reorganised,
+      # since an older tag has no such directory.
+      #
+      # The version still comes from the tag. Only the templates come from
+      # here.
+      - name: Checkout the packaging templates
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Take the checksums from the published archives
+        id: sums
+        if: matrix.pkgname == 'rimor-bin'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+
+          # The release event can arrive a moment before the uploads settle,
+          # so give the assets a little room rather than failing the run.
+          fetch_sum() {
+            local url="$1" i out
+            for i in $(seq 1 10); do
+              if out=$(curl -fsSL "$url" 2>/dev/null); then
+                printf '%s' "$out" | cut -d' ' -f1
+                return 0
+              fi
+              sleep 6
+            done
+            echo "asset never appeared: $url" >&2
+            return 1
+          }
+
+          {
+            echo "amd64=$(fetch_sum "${base}/rimor-${TAG}-linux-amd64.tar.gz.sha256")"
+            echo "arm64=$(fetch_sum "${base}/rimor-${TAG}-linux-arm64.tar.gz.sha256")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Take the checksum of the tagged source
+        id: srcsum
+        if: matrix.pkgname == 'rimor'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          # GitHub generates this tarball on demand. Pinning its checksum is
+          # still worth doing -- it is what makes the download verifiable --
+          # and CI recomputes it every release, so were GitHub ever to change
+          # how it packs an archive, the next release corrects itself.
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          sum=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
+          if [ -z "$sum" ]; then echo "could not checksum ${url}" >&2; exit 1; fi
+          echo "sha256=${sum}" >> "$GITHUB_OUTPUT"
+
+      - name: Render the PKGBUILD for this release
+        env:
+          PKGNAME: ${{ matrix.pkgname }}
+          PKGVER: ${{ steps.release.outputs.pkgver }}
+          SHA_AMD64: ${{ steps.sums.outputs.amd64 }}
+          SHA_ARM64: ${{ steps.sums.outputs.arm64 }}
+          SHA_SOURCE: ${{ steps.srcsum.outputs.sha256 }}
+        run: |
+          cd "packaging/aur/${PKGNAME}"
+          # pkgrel counts packaging revisions of one upstream version, so a
+          # new pkgver resets it.
+          sed -i \
+            -e "s/^pkgver=.*/pkgver=${PKGVER}/" \
+            -e "s/^pkgrel=.*/pkgrel=1/" \
+            PKGBUILD
+
+          # One package ships two architectures' archives, the other one
+          # tarball; each has only its own checksum lines to rewrite.
+          if [ "$PKGNAME" = "rimor-bin" ]; then
+            sed -i \
+              -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${SHA_AMD64}')/" \
+              -e "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${SHA_ARM64}')/" \
+              PKGBUILD
+          else
+            sed -i -e "s/^sha256sums=.*/sha256sums=('${SHA_SOURCE}')/" PKGBUILD
+          fi
+
+          grep -E '^(pkgname|pkgver|pkgrel|sha256sums)' PKGBUILD
+
+      - name: Generate .SRCINFO
+        env:
+          PKGNAME: ${{ matrix.pkgname }}
+        run: |
+          # makepkg refuses to run as root, and the AUR rejects a push whose
+          # .SRCINFO disagrees with its PKGBUILD, so this cannot be skipped.
+          useradd -m builder
+          chown -R builder "packaging/aur/${PKGNAME}"
+          su builder -c "cd 'packaging/aur/${PKGNAME}' && makepkg --printsrcinfo > .SRCINFO"
+          head -5 "packaging/aur/${PKGNAME}/.SRCINFO"
+
+      - name: Build the package
+        env:
+          PKGNAME: ${{ matrix.pkgname }}
+        run: |
+          # A PKGBUILD that does not build never reaches the AUR. The source
+          # package builds and tests rimor; the prebuilt one unpacks the
+          # x86_64 archive this runner can check.
+          pacman -S --noconfirm --needed go
+          su builder -c "cd 'packaging/aur/${PKGNAME}' && makepkg --noconfirm --cleanbuild"
+          ls -l "packaging/aur/${PKGNAME}"/*.pkg.tar.zst
+
+      - name: Publish to the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+          TAG: ${{ steps.release.outputs.tag }}
+          PKGNAME: ${{ matrix.pkgname }}
+        run: |
+          # Absolute paths throughout, and handed to ssh explicitly.
+          #
+          # `~` is not the same directory for the shell and for ssh: the shell
+          # expands it from $HOME, which the runner sets to /github/home,
+          # while OpenSSH expands it from the passwd entry, which for root in
+          # this container is /root. So writing ~/.ssh/known_hosts in a run
+          # step puts it somewhere ssh will never look, and the clone fails
+          # with "Host key verification failed" having just been told the host
+          # key is correct. Verified: ssh ignores a host key planted in $HOME
+          # and reads the passwd home instead.
+          ssh_dir="$(mktemp -d)"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          chmod 700 "$ssh_dir"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/aur"
+          chmod 600 "$ssh_dir/aur"
+
+          # Pinned rather than trusted-on-first-use: a bare scan accepts
+          # whatever answers, which is what an attacker in the middle would
+          # like. If the AUR rotates its key this fails loudly and the
+          # fingerprint below needs updating.
+          expected_hostkey="SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4"
+
+          ssh-keyscan -t ed25519 aur.archlinux.org > "$ssh_dir/known_hosts"
+          if [ ! -s "$ssh_dir/known_hosts" ]; then
+            echo "ssh-keyscan returned no host key for aur.archlinux.org." >&2
+            echo "Check outbound SSH from this runner." >&2
+            exit 1
+          fi
+
+          got_hostkey=$(ssh-keygen -lf "$ssh_dir/known_hosts" | awk '{print $2}')
+          if [ "$got_hostkey" != "$expected_hostkey" ]; then
+            echo "aur.archlinux.org presented an unexpected host key." >&2
+            echo "  got:      ${got_hostkey}" >&2
+            echo "  expected: ${expected_hostkey}" >&2
+            echo "Refusing to publish. If the AUR rotated its key, update the" >&2
+            echo "pin in this workflow after verifying it independently." >&2
+            exit 1
+          fi
+          echo "Host key verified: ${got_hostkey}"
+
+          # No ~/.ssh/config: every path ssh needs is given here, so nothing
+          # depends on which home directory it decides to use.
+          export GIT_SSH_COMMAND="ssh -i ${ssh_dir}/aur -o IdentitiesOnly=yes -o UserKnownHostsFile=${ssh_dir}/known_hosts -o StrictHostKeyChecking=yes"
+
+          # A package the AUR does not have yet clones as an empty repository
+          # rather than failing, and the first push creates it -- which is how
+          # a new package is published, and why this needs no special case.
+          git clone "ssh://aur@aur.archlinux.org/${PKGNAME}.git" aur-repo
+          cp "packaging/aur/${PKGNAME}/PKGBUILD" \
+             "packaging/aur/${PKGNAME}/.SRCINFO" \
+             aur-repo/
+
+          cd aur-repo
+          git config user.name "$AUR_USERNAME"
+          git config user.email "$AUR_EMAIL"
+          git add -A
+
+          # Re-running a tag that points at the same commit produces an
+          # identical package, and the AUR rejects empty commits. That is a
+          # no-op worth reporting, not a failure.
+          if git diff --cached --quiet; then
+            echo "${PKGNAME} already matches ${TAG}; nothing to publish."
+            exit 0
+          fi
+
+          git commit -m "${PKGNAME} ${TAG}"
+
+          # An empty repository has no master branch until this creates one;
+          # HEAD:master works for the first push and every later one alike.
+          git push origin HEAD:master

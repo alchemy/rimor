@@ -73,36 +73,19 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
 
 ## Install
 
-rimor is pure Go with no C dependencies; Go 1.27 or newer builds it for
-Linux, macOS and Windows.
+rimor is a single binary with no runtime dependencies, for Linux, macOS and
+Windows on amd64 and arm64.
 
-```sh
-go install rimor.dev/cmd/rimor@latest
-```
+- **Releases:** download the archive for your system from
+  [GitHub Releases](https://github.com/alchemy/rimor/releases). The binaries
+  are not signed: on macOS run `xattr -d com.apple.quarantine rimor` after
+  unpacking; on Windows, SmartScreen may ask you to confirm.
+- **Arch Linux:** `rimor` (built from source) or `rimor-bin` (prebuilt) from
+  the AUR, e.g. `yay -S rimor`.
+- **With Go** 1.27 or newer: `go install rimor.dev/cmd/rimor@latest`.
+- **From a checkout:** `go build ./cmd/rimor`.
 
-(This needs `rimor.dev` to point Go at the repository; until it does, build
-from a checkout.)
-
-From a checkout:
-
-```sh
-go build ./cmd/rimor
-./rimor
-```
-
-## Themes
-
-`theme` in `config.toml` picks the colours:
-
-| Theme | |
-|---|---|
-| `auto` (default) | On Omarchy, `terminal`, so rimor follows the system theme. Elsewhere `dark` or `light`, matching the background the terminal reports |
-| `dark` | Catppuccin Mocha |
-| `light` | Catppuccin Latte |
-| `terminal` | The terminal's own 16 colours; the cursor row and selection are shaded from its background |
-
-rimor never paints the terminal's background. Setting `NO_COLOR` turns colours
-off, with the cursor row and selection in reverse video.
+`rimor -version` prints the version.
 
 The Nerd Font icons appear automatically when your terminal bundles them
 (kitty, Ghostty, WezTerm) or a Nerd Font is installed; otherwise rimor uses
@@ -262,6 +245,23 @@ results) are not remappable yet.
   hidden, and `.` shows them.
 - Copying uses the terminal's clipboard support (OSC 52), which
   Terminal.app lacks and iTerm2 has off by default.
+
+## Releasing
+
+Pushing a version tag releases it:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+[release.yml](.github/workflows/release.yml) tests the tagged commit, builds
+the six archives, and publishes a GitHub Release with their checksums; then
+[aur-publish.yml](.github/workflows/aur-publish.yml) builds the `rimor` and
+`rimor-bin` packages from the templates in `packaging/aur/` and pushes them
+to the AUR. A tag with a hyphen (`v0.2.0-rc.1`) is published on GitHub as a
+prerelease and skips the AUR. The AUR job needs the `AUR_SSH_PRIVATE_KEY`,
+`AUR_USERNAME` and `AUR_EMAIL` secrets; it can be re-run for an existing tag
+from the Actions tab.
 
 ## Development
 

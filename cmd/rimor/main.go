@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -12,7 +14,31 @@ import (
 	"rimor.dev/internal/ui"
 )
 
+// version is set by release builds (-ldflags "-X main.version=v1.2.3").
+var version string
+
+// Version is the release version: set at build time, else the module
+// version go install records, else "dev" for a local build.
+func Version() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
+
 func main() {
+	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "rimor %s, a terminal workbench for SQL databases\n\nUsage: rimor [-version]\n", Version())
+	}
+	flag.Parse()
+	if *showVersion {
+		fmt.Println("rimor", Version())
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "rimor:", err)
 		os.Exit(1)
