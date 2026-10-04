@@ -189,6 +189,9 @@ type Object struct {
 	// types or XML schema collections. The explorer hides them unless asked.
 	// The user's default schema is never empty.
 	Empty bool
+	// Implicit marks a column the table has without declaring it: SQLite's
+	// rowid.
+	Implicit bool
 }
 
 // schemaObject builds a schema from a (name, "empty" or "") row.

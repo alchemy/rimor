@@ -276,3 +276,54 @@ func TestSQLServerSchemaEmptiness(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLiteRowidColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rowid.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		`CREATE TABLE plain (a TEXT)`,
+		`CREATE TABLE aliased (id INTEGER PRIMARY KEY, a TEXT)`,
+		`CREATE TABLE intkey (id INT PRIMARY KEY, a TEXT)`,
+		`CREATE TABLE norowid (id INTEGER PRIMARY KEY, a TEXT) WITHOUT ROWID`,
+		`CREATE TABLE shadowed (rowid TEXT, a TEXT)`,
+		`CREATE VIEW v AS SELECT a FROM plain`,
+	} {
+		if _, err := raw.Exec(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw.Close()
+
+	pool := NewPool(Config{Driver: SQLite, DSN: path})
+	defer pool.Close()
+	columns := func(table string) []string {
+		objs, err := pool.Children(context.Background(), &Object{Kind: KindFolder, Contains: KindColumn, Table: table})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, o := range objs {
+			s := o.Name + " " + o.Detail
+			if o.Implicit {
+				s += " (implicit)"
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	for table, want := range map[string][]string{
+		"plain":    {"rowid implicit (implicit)", "a TEXT"},
+		"aliased":  {"id rowid", "a TEXT"},                            // the key is the rowid
+		"intkey":   {"rowid implicit (implicit)", "id INT", "a TEXT"}, // INT is not INTEGER
+		"norowid":  {"id INTEGER", "a TEXT"},
+		"shadowed": {"oid implicit (implicit)", "rowid TEXT", "a TEXT"},
+		"v":        {"a TEXT"}, // views have no rowid
+	} {
+		if got := columns(table); !slices.Equal(got, want) {
+			t.Errorf("%s: %q, want %q", table, got, want)
+		}
+	}
+}

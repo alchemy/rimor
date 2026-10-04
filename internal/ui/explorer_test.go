@@ -188,7 +188,7 @@ func TestExplorerAddAndBrowseSQLite(t *testing.T) {
 	d.key("enter", "down", "enter", "down", "enter", "down", "enter")
 	s := d.screen()
 	t.Log("\n" + s)
-	for _, want := range []string{"shop", "Tables  1", "customer", "Columns  2", "id  INTEGER", "name  TEXT"} {
+	for _, want := range []string{"shop", "Tables  1", "customer", "Columns  2", "id  rowid", "name  TEXT"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("screen lacks %q", want)
 		}

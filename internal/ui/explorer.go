@@ -690,6 +690,8 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 				if n.loaded {
 					detail = strconv.Itoa(len(n.children))
 				}
+			case n.obj.Kind == db.KindColumn && n.obj.Implicit:
+				nameStyle = mutedStyle // SQLite's rowid: there, but not declared
 			case n.obj.Kind == db.KindSchema && n.obj.Empty:
 				nameStyle, detail = mutedStyle, "empty" // shown only with all schemas
 			case n.obj.Kind == db.KindDatabase && n.showAll:
