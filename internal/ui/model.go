@@ -45,8 +45,9 @@ type Model struct {
 	split       layout
 
 	keys         keymap
-	leader       bool // the leader key was pressed; the next key picks an action
-	leaderRepeat bool // a resize step ran; further steps need no new leader
+	help         *helpOverlay // the key help, over everything; nil when closed
+	leader       bool         // the leader key was pressed; the next key picks an action
+	leaderRepeat bool         // a resize step ran; further steps need no new leader
 
 	// theme is the resolved theme setting; the palette may still adapt to
 	// the terminal's background when it reports it.
@@ -69,7 +70,7 @@ func New(store db.Store, sessionPath string, settings config.Settings) Model {
 			focusExplorer: {index: 1, title: "Explorer"},
 			focusQuery:    {index: 2, title: "Query"},
 			focusResults: {index: 3, title: "Results",
-				footer: hints(shortKey(keys.leader), "keys", shortKey(keys.first("quit", false)), "quit")},
+				footer: hints(helpKey(keys.first("help", false)), "keys", shortKey(keys.first("quit", false)), "quit")},
 		},
 		keys:        keys,
 		theme:       theme,
@@ -157,6 +158,9 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		}
 		if h, ok := m.modal.(heightLimiter); ok {
 			h.setHeight(m.dialogHeight())
+		}
+		if m.help != nil {
+			m.help.setSize(m.dialogWidth(), m.dialogHeight())
 		}
 		return nil
 
@@ -326,6 +330,17 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if bound && action == "quit" {
 		return tea.Quit
 	}
+	// The help overlay takes every key while open; the help key opens it
+	// from anywhere, a dialog included.
+	if m.help != nil {
+		if m.help.Update(msg) || (bound && action == "help") {
+			m.help = nil
+		}
+		return nil
+	}
+	if bound && action == "help" {
+		return m.do(action)
+	}
 	if m.modal != nil {
 		var cmd tea.Cmd
 		m.modal, cmd = m.modal.Update(msg)
@@ -357,6 +372,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "1", "2", "3":
 		m.setFocus(focus(key[0] - '1'))
+		return nil
+	case "?":
+		m.help = newHelp(m)
 		return nil
 	}
 	switch m.focus {
@@ -394,7 +412,7 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = true // to recheck the background, see FocusMsg
-	if p, ok := m.modal.(*cellPopup); ok && m.width >= minWidth && m.height >= minHeight {
+	if p, ok := m.modal.(*cellPopup); ok && m.help == nil && m.width >= minWidth && m.height >= minHeight {
 		if x, y, ok := p.cursor(); ok {
 			dx, dy := m.dialogPos(p.View(m.dialogWidth()))
 			c := tea.NewCursor(dx+x, dy+y)
@@ -403,7 +421,7 @@ func (m Model) View() tea.View {
 			v.Cursor = c
 		}
 	}
-	if m.modal == nil && m.width >= minWidth && m.height >= minHeight {
+	if m.modal == nil && m.help == nil && m.width >= minWidth && m.height >= minHeight {
 		if x, y, ok := m.query.Cursor(); ok {
 			left := 0 // the query pane's left edge
 			if !m.split.full {
@@ -495,19 +513,26 @@ func (m Model) render() string {
 			m.renderPane(focusResults, rightW, bottomH))
 		base = lipgloss.JoinHorizontal(lipgloss.Top, m.renderPane(focusExplorer, leftW, m.height), right)
 	}
+	// Dialogs, then the key help over everything.
+	layers := []*lipgloss.Layer{lipgloss.NewLayer(base)}
 	var dialog string
 	switch {
 	case m.modal != nil:
 		dialog = m.modal.View(m.dialogWidth())
 	case m.leader && !m.leaderRepeat:
 		dialog = m.leaderHelp(m.dialogWidth())
-	default:
+	}
+	if dialog != "" {
+		x, y := m.dialogPos(dialog)
+		layers = append(layers, lipgloss.NewLayer(dialog).X(x).Y(y).Z(1))
+	}
+	if m.help != nil {
+		help := m.help.View()
+		x, y := m.dialogPos(help)
+		layers = append(layers, lipgloss.NewLayer(help).X(x).Y(min(y, 1)).Z(2))
+	}
+	if len(layers) == 1 {
 		return base
 	}
-
-	x, y := m.dialogPos(dialog)
-	return lipgloss.NewCompositor(
-		lipgloss.NewLayer(base),
-		lipgloss.NewLayer(dialog).X(x).Y(y).Z(1),
-	).Render()
+	return lipgloss.NewCompositor(layers...).Render()
 }

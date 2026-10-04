@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +112,9 @@ func (d *driver) key(keys ...string) {
 			msg.Code = tea.KeyPgDown
 		case "space":
 			msg.Code, msg.Text = tea.KeySpace, " "
+		case "f1", "f2", "f5":
+			n, _ := strconv.Atoi(base[1:])
+			msg.Code = tea.KeyF1 + rune(n-1)
 		default:
 			if len([]rune(base)) > 1 {
 				d.t.Fatalf("key: unknown key name %q", base) // never guess a letter

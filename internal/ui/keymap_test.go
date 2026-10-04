@@ -94,8 +94,9 @@ func TestRemappedKeys(t *testing.T) {
 	if d.m.split.full {
 		t.Fatal("new leader binding does not work")
 	}
-	if s := ansi.Strip(d.m.render()); !strings.Contains(s, "^b keys") {
-		t.Errorf("footer does not name the leader")
+	// The footer points to the key help, which lists the leader's keys.
+	if s := ansi.Strip(d.m.render()); !strings.Contains(s, "F1 keys") {
+		t.Errorf("footer does not name the help key")
 	}
 }
 

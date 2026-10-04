@@ -332,9 +332,9 @@ func (m *Model) handleMove(key string) bool {
 		} else {
 			to = m.nextPos(m.cursor)
 		}
-	case "ctrl+left", "alt+left", "alt+b":
+	case "ctrl+left", "alt+left":
 		to = m.wordLeft(m.cursor)
-	case "ctrl+right", "alt+right", "alt+f":
+	case "ctrl+right", "alt+right":
 		to = m.wordRight(m.cursor)
 	case "up":
 		to, vertical = m.vertical(-1), true

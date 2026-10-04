@@ -155,6 +155,11 @@ included; for a hard guarantee, use a login without write permissions.
 
 ## Keys
 
+**`F1`** shows the keys that apply where you are: the focused pane or the
+open dialog, then the app-wide ones, with your own bindings. `tab` in it
+lists every key, and typing filters them. Outside text input `?` opens it
+too, and so does `ctrl+g` then `?`.
+
 App-wide shortcuts work in every pane, including the editor. Each one also
 works as the leader key (`ctrl+g`) followed by a second key; press `ctrl+g`
 on its own to list them.

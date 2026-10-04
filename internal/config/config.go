@@ -55,6 +55,7 @@ type Action struct {
 // include the US (!@#) and Italian (!"£) variants.
 var Actions = []Action{
 	{"quit", "Quit", []string{"ctrl+q"}},
+	{"help", "Show the keys that apply here", []string{"f1", "leader ?"}},
 	{"focus_explorer", "Focus the explorer", []string{"alt+1", "leader 1"}},
 	{"focus_query", "Focus the query editor", []string{"alt+2", "leader 2"}},
 	{"focus_results", "Focus the results", []string{"alt+3", "leader 3"}},

@@ -111,6 +111,8 @@ func (m *Model) do(action string) tea.Cmd {
 	switch action {
 	case "quit":
 		return tea.Quit
+	case "help":
+		m.help = newHelp(m)
 	case "focus_explorer":
 		m.setFocus(focusExplorer)
 	case "focus_query":
@@ -170,7 +172,7 @@ func (m Model) leaderHelp(maxWidth int) string {
 	}
 	width := min(lipgloss.Width(strings.Join(rows, "\n"))+6, maxWidth)
 	body := lipgloss.NewStyle().Padding(1, 2).Render(strings.Join(rows, "\n"))
-	p := pane{title: m.keys.leader + " …", footer: hints("esc", "cancel")}
+	p := pane{title: m.keys.leader + " …", footer: hints("?", "all keys", "esc", "cancel")}
 	return p.render(body, width, lipgloss.Height(body)+2, true)
 }
 
