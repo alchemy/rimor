@@ -39,6 +39,8 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   when you expand them, without freezing the UI. Built-in schemas are left
   out, and so are schemas with nothing in them, so a typical SQL Server
   database shows just `dbo`. `.` on a database lists the empty ones too.
+  SQLite tables show their `rowid`: the implicit one, or the
+  `INTEGER PRIMARY KEY` column that stands in for it.
 - **Query tabs.** Each tab has a *context*, a connection plus an optional
   database, shown in the pane's bottom border. A new tab takes the context
   of the item selected in the explorer, and `ctrl+e` changes it. Tabs save
@@ -68,6 +70,8 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   temp tables and open transactions carry over between runs.
 - **Layout.** Drag the borders between panes, or resize from the keyboard.
   Any pane can go full screen.
+- **Keys at hand.** `F1` lists the keys that apply where you are, with
+  your own bindings, and filters them as you type.
 - **Configurable.** Shortcuts can be remapped, and a leader key gives every
   `alt` shortcut an alternative for terminals that keep `alt` for themselves.
 
@@ -166,6 +170,7 @@ on its own to list them.
 
 | Keys | Action |
 |---|---|
+| `F1` | The keys that apply here; `tab` in it lists every key |
 | `alt+1` `alt+2` `alt+3` | Focus explorer, query, results |
 | `alt+f` | Toggle full screen for the focused pane |
 | `shift+alt+1/2/3` | Show a pane in full screen |
@@ -188,7 +193,7 @@ disconnects, `.` shows or hides a database's empty schemas.
 first or last row, `home`/`end` to the first or last column, `y` copies the
 cell, `Y` copies the row.
 
-Outside the editor, `tab` cycles focus and `q` quits. The mouse focuses panes
+Outside the editor, `tab` cycles focus, `?` shows the keys and `q` quits. The mouse focuses panes
 and drags the borders between them; a double click on a border resets it.
 Use `shift`+drag for the terminal's own text selection.
 

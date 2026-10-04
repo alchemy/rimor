@@ -364,7 +364,8 @@ footer.wrap {
         <dt>Explorer</dt>
         <dd>Your connections and their catalog as a tree: databases, schemas,
           tables, views, functions, indexes and columns with their types. Each
-          level loads when you open it, and empty schemas stay out of the way.</dd>
+          level loads when you open it, and empty schemas stay out of the way.
+          SQLite tables show their <code>rowid</code>.</dd>
       </div>
       <div>
         <dt>Query tabs</dt>
@@ -379,6 +380,18 @@ footer.wrap {
           background, stored compactly enough for millions of them. Scroll by
           row and by column; <kbd>esc</kbd> stops fetching and keeps what
           arrived.</dd>
+      </div>
+      <div>
+        <dt>Editing</dt>
+        <dd>Open a cell to see its whole value, copy it, or change it. rimor
+          shows the <code>UPDATE</code> it will run, touches only that row,
+          and refuses if someone changed it since you loaded it. JSON gets
+          its own editor, and invalid JSON is never sent.</dd>
+      </div>
+      <div>
+        <dt>Read-only connections</dt>
+        <dd>Mark a connection read-only and writes are refused: by the server
+          on PostgreSQL, by the engine on SQLite, by rimor on SQL Server.</dd>
       </div>
       <div>
         <dt>Errors</dt>
@@ -404,8 +417,8 @@ footer.wrap {
       <div>
         <dt>Layout and keys</dt>
         <dd>Drag the borders between panes, or resize from the keyboard; any
-          pane goes full screen with <kbd>alt+f</kbd>. Every shortcut can be
-          remapped, and <kbd>ctrl+g</kbd> lists them all.</dd>
+          pane goes full screen with <kbd>alt+f</kbd>. <kbd>F1</kbd> shows the
+          keys that apply where you are, and every shortcut can be remapped.</dd>
       </div>
     </dl>
   </section>
