@@ -43,6 +43,17 @@ func agentDriver(t *testing.T) *driver {
 	settings.Icons = config.IconsPlain
 	d := &driver{t: t, m: New(store, "", settings), wait: 5 * time.Second}
 	d.send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	// Close the file before the temporary directory goes: Windows cannot
+	// delete a file that is open. Sessions go back to their pool, which
+	// closes every connection.
+	t.Cleanup(func() {
+		for _, tb := range d.m.query.tabs {
+			if tb.session != nil {
+				tb.session.Close()
+			}
+		}
+		d.m.explorer.Close()
+	})
 	return d
 }
 
