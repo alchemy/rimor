@@ -22,6 +22,7 @@ type sessionTab struct {
 	Content    *string `json:"content,omitempty"` // only for unsaved changes
 	Line       int     `json:"line"`
 	Col        int     `json:"col"`
+	Agent      bool    `json:"agent,omitempty"` // opened by an agent
 }
 
 type session struct {
@@ -78,7 +79,7 @@ func saveSession(path string, s session) error {
 func (q *QueryPane) snapshot() session {
 	s := session{Active: q.active, Untitled: q.untitled}
 	for _, t := range q.tabs {
-		st := sessionTab{Path: t.path, Database: t.ctx.database}
+		st := sessionTab{Path: t.path, Database: t.ctx.database, Agent: t.agent}
 		if t.path == "" {
 			st.Name = t.name
 		}
@@ -129,6 +130,7 @@ func (q *QueryPane) restore(s session, resolve func(string) *connection) {
 			}
 		}
 		t.ed.SetCursorPosition(st.Line, st.Col)
+		t.agent, t.agentVersion = st.Agent, t.ed.Version()
 		q.tabs = append(q.tabs, t)
 	}
 	q.active = min(max(s.Active, 0), max(len(q.tabs)-1, 0))

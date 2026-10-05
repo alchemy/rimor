@@ -10,7 +10,7 @@ import (
 // sqlite hierarchy (main database only):
 //
 //	Tables | Views | Indexes | Triggers
-//	table → Columns | Indexes
+//	table → Columns | Indexes | Foreign Keys
 //	view  → Columns
 type sqlite struct{}
 
@@ -29,6 +29,7 @@ func (sqlite) Children(ctx context.Context, conn *sql.DB, p *Object) ([]Object, 
 		return []Object{
 			folder("Columns", KindColumn, "", p.Name),
 			folder("Indexes", KindIndex, "", p.Name),
+			folder("Foreign Keys", KindForeignKey, "", p.Name),
 		}, nil
 	case KindView:
 		return []Object{folder("Columns", KindColumn, "", p.Name)}, nil
@@ -48,6 +49,8 @@ func sqliteFolder(ctx context.Context, conn *sql.DB, p *Object) ([]Object, error
 				return nil, err
 			}
 			return sqliteRowid(ctx, conn, p.Table, cols)
+		case KindForeignKey:
+			return foreignKeyObjects(sqlite{}.foreignKeys(ctx, conn, "", p.Table))
 		case KindIndex:
 			return queryIndexes(ctx, conn, `
 				SELECT name, "unique", origin = 'pk' FROM pragma_index_list(?) ORDER BY name`, p.Table)

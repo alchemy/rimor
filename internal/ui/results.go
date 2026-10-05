@@ -81,6 +81,7 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 	if t.run.busy() {
 		return nil
 	}
+	q.notice = "" // such as the agent's reminder to review
 	if t.ctx.conn == nil {
 		q.notice = errorStyle.Render("Choose a connection first (^e)")
 		return nil

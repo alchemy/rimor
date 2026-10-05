@@ -125,6 +125,8 @@ var (
 	iconIndex      = icon{"", "≡", &colorLavender}
 	iconTrigger    = icon{"", "↝", &colorYellow}
 	iconColumn     = icon{"", "·", &colorTitle}
+	iconAgent      = icon{"\U000F0674", "✶", &colorAccent}
+	iconForeignKey = icon{"\uf0c1", "↗", &colorSapphire}
 	iconKey        = icon{"", "◆", &colorYellow}
 )
 
@@ -183,6 +185,8 @@ func objectIcon(o db.Object, expanded bool) icon {
 		return iconIndex
 	case db.KindTrigger:
 		return iconTrigger
+	case db.KindForeignKey:
+		return iconForeignKey
 	case db.KindColumn:
 		if o.Primary {
 			return iconKey

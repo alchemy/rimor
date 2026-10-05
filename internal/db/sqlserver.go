@@ -12,7 +12,7 @@ import (
 //
 //	database → schema
 //	schema → Tables | Views | Procedures | Functions
-//	table  → Columns | Indexes
+//	table  → Columns | Indexes | Foreign Keys
 //	view   → Columns
 type sqlserver struct{}
 
@@ -62,6 +62,7 @@ func (sqlserver) Children(ctx context.Context, conn *sql.DB, p *Object) ([]Objec
 		return []Object{
 			folder("Columns", KindColumn, p.Schema, p.Name),
 			folder("Indexes", KindIndex, p.Schema, p.Name),
+			folder("Foreign Keys", KindForeignKey, p.Schema, p.Name),
 		}, nil
 	case KindView:
 		return []Object{folder("Columns", KindColumn, p.Schema, p.Name)}, nil
@@ -93,6 +94,8 @@ func sqlserverFolder(ctx context.Context, conn *sql.DB, p *Object) ([]Object, er
 		return objects(KindFunction, "'FN', 'IF', 'TF', 'FS', 'FT'")
 	case KindColumn:
 		return sqlserverColumns(ctx, conn, p.Schema, p.Table)
+	case KindForeignKey:
+		return foreignKeyObjects(sqlserver{}.foreignKeys(ctx, conn, p.Schema, p.Table))
 	case KindIndex:
 		return queryIndexes(ctx, conn, `
 			SELECT name, is_unique, is_primary_key FROM sys.indexes

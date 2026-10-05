@@ -124,6 +124,20 @@ func (m *Model) SetText(s string) {
 	m.version++
 }
 
+// ReplaceText replaces the buffer as one edit, which undo reverts.
+func (m *Model) ReplaceText(s string) {
+	m.checkpoint(editOther)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	m.lines = nil
+	for l := range strings.SplitSeq(s, "\n") {
+		m.lines = append(m.lines, []rune(l))
+	}
+	m.cursor, m.anchor, m.goal = pos{}, nil, -1
+	m.last = editNone
+	m.version++
+	m.scroll()
+}
+
 func (m *Model) Text() string {
 	var b strings.Builder
 	for i, l := range m.lines {

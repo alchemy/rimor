@@ -56,11 +56,17 @@ func (c queryContext) render() string {
 }
 
 type tab struct {
+	id    int // for agents, unique while rimor runs
 	ed    *editor.Model
 	path  string // empty until the tab is saved
 	name  string // untitled-N, for tabs without a file
 	ctx   queryContext
 	saved int // editor version at the last load or save
+
+	// agent marks a tab an agent opened; it may change the tab while the
+	// editor is still at agentVersion, the version it last wrote.
+	agent        bool
+	agentVersion int
 
 	// Statements run on a connection of their own, opened on first run.
 	session    *sql.Conn
@@ -121,6 +127,7 @@ type QueryPane struct {
 	tabs     []*tab
 	active   int
 	untitled int // last untitled-N number handed out
+	lastID   int // last tab id handed out
 
 	width, height int // editor area
 	focused       bool
@@ -160,7 +167,8 @@ func (q *QueryPane) Blur() {
 
 // newTab makes a tab without adding it; callers name it or give it a file.
 func (q *QueryPane) newTab(ctx queryContext) *tab {
-	t := &tab{ed: editor.New(editorTheme)}
+	q.lastID++
+	t := &tab{id: q.lastID, ed: editor.New(editorTheme)}
 	t.ed.Placeholder = "-- write SQL here"
 	t.ed.SetSize(q.width, q.height)
 	t.setContext(ctx)
@@ -391,6 +399,9 @@ func (q *QueryPane) Tabs(width int, focused bool) string {
 			name = st.Render(t.title())
 		}
 		label := dot + " " + name
+		if t.agent {
+			label = dot + " " + iconStyle(iconAgent).Render(iconAgent.String()) + " " + name
+		}
 		if t.dirty() {
 			label += lipgloss.NewStyle().Foreground(colorPeach).Render(" ●")
 		}

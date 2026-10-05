@@ -10,7 +10,7 @@ import (
 //
 //	database → schema
 //	schema → Tables | Views | Materialized Views | Functions | Sequences
-//	table  → Columns | Indexes
+//	table  → Columns | Indexes | Foreign Keys
 //	view   → Columns
 type postgres struct{}
 
@@ -57,6 +57,7 @@ func (postgres) Children(ctx context.Context, conn *sql.DB, p *Object) ([]Object
 		return []Object{
 			folder("Columns", KindColumn, p.Schema, p.Name),
 			folder("Indexes", KindIndex, p.Schema, p.Name),
+			folder("Foreign Keys", KindForeignKey, p.Schema, p.Name),
 		}, nil
 	case KindView, KindMatView:
 		return []Object{folder("Columns", KindColumn, p.Schema, p.Name)}, nil
@@ -110,6 +111,8 @@ func postgresFolder(ctx context.Context, conn *sql.DB, p *Object) ([]Object, err
 			WHERE a.attrelid = `+pgRelation+`
 			  AND a.attnum > 0 AND NOT a.attisdropped
 			ORDER BY a.attnum`, p.Schema, p.Table)
+	case KindForeignKey:
+		return foreignKeyObjects(postgres{}.foreignKeys(ctx, conn, p.Schema, p.Table))
 	case KindIndex:
 		return queryIndexes(ctx, conn, `
 			SELECT c.relname, i.indisunique, i.indisprimary

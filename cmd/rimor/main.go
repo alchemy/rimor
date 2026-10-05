@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -9,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"rimor.dev/internal/agent"
 	"rimor.dev/internal/config"
 	"rimor.dev/internal/db"
 	"rimor.dev/internal/ui"
@@ -30,9 +34,20 @@ func Version() string {
 }
 
 func main() {
+	// rimor mcp: the MCP server an AI agent starts, which talks to the
+	// rimor the user has open.
+	if len(os.Args) == 2 && os.Args[1] == "mcp" {
+		if err := agent.RunMCP(os.Stdin, os.Stdout, Version()); err != nil {
+			fmt.Fprintln(os.Stderr, "rimor mcp:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "rimor %s, a terminal workbench for SQL databases\n\nUsage: rimor [-version]\n", Version())
+		fmt.Fprintf(flag.CommandLine.Output(), "rimor %s, a terminal workbench for SQL databases\n\n"+
+			"Usage:\n  rimor [-version]\n  rimor mcp    MCP server for AI agents, on stdin and stdout\n", Version())
 	}
 	flag.Parse()
 	if *showVersion {
@@ -61,9 +76,38 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	final, err := tea.NewProgram(ui.New(store, sessionPath, settings)).Run()
+	m := ui.New(store, sessionPath, settings)
+	var srv *agent.Server
+	if settings.Agent {
+		// Without the socket rimor still works; agents just cannot reach it.
+		if srv, err = agent.Listen(); err != nil {
+			m = m.WithAgentError(err)
+		} else {
+			defer srv.Close()
+		}
+	}
+	p := tea.NewProgram(m)
+	if srv != nil {
+		go srv.Serve(forward(p))
+	}
+	final, err := p.Run()
 	if m, ok := final.(ui.Model); ok {
 		m.Close()
 	}
 	return err
+}
+
+// forward hands agent tool calls to the UI, which owns the connections
+// and tabs, and waits for its answer.
+func forward(p *tea.Program) agent.Handler {
+	return func(ctx context.Context, tool string, args json.RawMessage) (any, error) {
+		reply := make(chan ui.AgentReply, 1)
+		go p.Send(ui.AgentRequestMsg{Tool: tool, Args: args, Reply: reply})
+		select {
+		case r := <-reply:
+			return r.Result, r.Err
+		case <-ctx.Done():
+			return nil, errors.New("rimor did not answer in time")
+		}
+	}
 }

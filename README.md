@@ -35,7 +35,7 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
 
 - **Explorer.** Saved connections and the catalog as a tree: databases,
   schemas, tables, views, materialized views, functions, procedures,
-  sequences, indexes, triggers and columns with their types. Levels load
+  sequences, indexes, triggers, foreign keys and columns with their types. Levels load
   when you expand them, without freezing the UI. Built-in schemas are left
   out, and so are schemas with nothing in them, so a typical SQL Server
   database shows just `dbo`. `.` on a database lists the empty ones too.
@@ -70,6 +70,9 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   temp tables and open transactions carry over between runs.
 - **Layout.** Drag the borders between panes, or resize from the keyboard.
   Any pane can go full screen.
+- **AI agents.** An agent such as Claude Code, in another terminal, can
+  read your catalog and open query tabs for you to review and run. It never
+  runs anything, and never sees credentials or result rows.
 - **Keys at hand.** `F1` lists the keys that apply where you are, with
   your own bindings, and filters them as you type.
 - **Configurable.** Shortcuts can be remapped, and a leader key gives every
@@ -157,6 +160,53 @@ then refuses writes, and on SQLite the engine does. SQL Server has no
 read-only session setting, so rimor refuses statements that write, `EXEC`
 included; for a hard guarantee, use a login without write permissions.
 
+## AI agents
+
+rimor can work alongside an AI agent. With rimor open in one terminal and,
+say, Claude Code in another, ask *"from ERP, the customer orders whose
+delivery date has passed"*: the agent looks up the tables it needs, and the
+query appears in a new tab in rimor, marked with a sparkle (`✶` with plain
+icons), waiting for you. It runs only when you run it.
+
+Register rimor with the agent once:
+
+```sh
+claude mcp add rimor -- rimor mcp
+```
+
+Other MCP clients run `rimor mcp` as a stdio server. It holds no
+connections of its own: it talks to the rimor you have open, through a
+socket only your user can open (in `$XDG_RUNTIME_DIR`, or the temporary
+folder). With rimor closed, the agent is told to ask you to start it.
+
+| Tool | What the agent gets |
+|---|---|
+| `list_connections` | Each connection's name, driver and read-only flag, and the server version once it is open |
+| `list_objects` | One level of the explorer: databases, schemas, tables, views, functions… |
+| `search_objects` | Tables, views, routines and columns whose names contain some text |
+| `describe` | A table's columns, types, defaults, comments, keys, indexes, and foreign keys in both directions |
+| `open_query` | Opens a tab with its SQL, on a connection and database, and shows it to you |
+| `update_query` | Revises a tab it opened; `ctrl+z` brings back the previous version |
+| `list_tabs`, `read_tab` | Your tabs, their SQL and selection, and how the last run went |
+
+What the agent does not get:
+
+- **No way to run SQL.** Its tabs run when you press the run key, like any
+  other. Read-only connections still refuse writes.
+- **No credentials.** Not the connection string, host, user, password or
+  SQLite file path: only the names you gave the connections.
+- **No result rows.** After you run a tab, `read_tab` says whether it failed,
+  with the database's message, code and position, or which columns and how
+  many rows it returned. PostgreSQL error details are left out, since they
+  can quote row values; SQL Server's messages can still quote a key value,
+  as in a duplicate-key error.
+- **Not your tabs.** It can revise only the tabs it opened, and only until
+  you edit them.
+
+The agent does read your catalog, comments included, and its model provider
+sees what it reads. To turn agent access off, set `agent = false` in
+`config.toml`.
+
 ## Keys
 
 **`F1`** shows the keys that apply where you are: the focused pane or the
@@ -228,6 +278,7 @@ theme = "light"         # "auto", "dark", "light" or "terminal"
 icons = "plain"         # "auto", "nerd" or "plain"
 leader = "ctrl+b"
 result_memory_mb = 2048 # memory a query's rows may take
+agent = false           # no AI agent access (see AI agents)
 
 [keys]
 full_screen = ["alt+z", "leader z"]   # replaces alt+f and leader f
@@ -296,7 +347,8 @@ tables.
 | Package | Contents |
 |---|---|
 | `cmd/rimor` | entry point |
-| `internal/ui` | panes, layout, dialogs, key handling |
+| `internal/ui` | panes, layout, dialogs, key handling, agent tool calls |
+| `internal/agent` | `rimor mcp` and the socket to the running rimor |
 | `internal/editor` | the SQL editor and highlighting |
 | `internal/db` | connections, catalog queries per driver, execution |
 | `internal/config` | `config.toml` and the bindable actions |

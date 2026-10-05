@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 )
 
 const app = "rimor"
@@ -42,6 +43,52 @@ func dir(xdgVar, windowsVar, unixRel string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, unixRel, app), nil
+}
+
+// Runtime is the directory for the agent socket, private to the user:
+// $XDG_RUNTIME_DIR/rimor where set, else in the temporary directory, which
+// is per-user on macOS and Windows. Elsewhere the directory is named after
+// the user and checked to be theirs alone (see private).
+//
+// Socket paths are limited to about 100 bytes, so a directory too deep for
+// one falls back to the next choice, and finally to /tmp.
+func Runtime() (string, error) {
+	var dirs []string
+	if base := os.Getenv("XDG_RUNTIME_DIR"); base != "" {
+		dirs = append(dirs, filepath.Join(base, app))
+	}
+	switch runtime.GOOS {
+	case "windows", "darwin":
+		dirs = append(dirs, filepath.Join(os.TempDir(), app))
+	default:
+		dirs = append(dirs, filepath.Join(os.TempDir(), app+"-"+strconv.Itoa(os.Getuid())))
+	}
+	if runtime.GOOS != "windows" {
+		dirs = append(dirs, filepath.Join("/tmp", app+"-"+strconv.Itoa(os.Getuid())))
+	}
+	for _, dir := range dirs {
+		if len(dir) <= MaxSocketDir {
+			return dir, nil
+		}
+	}
+	return dirs[len(dirs)-1], nil
+}
+
+// MaxSocketDir is the longest directory that leaves room for a socket
+// named after a process id: macOS allows 104 bytes in all.
+const MaxSocketDir = 104 - len("/4294967295.sock") - 1
+
+// MakeRuntime creates the runtime directory, readable by the user only,
+// and returns it.
+func MakeRuntime() (string, error) {
+	dir, err := Runtime()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, private(dir)
 }
 
 // Home returns the user's home directory, or "" when it is unknown.

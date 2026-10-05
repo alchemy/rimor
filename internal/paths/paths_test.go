@@ -3,6 +3,7 @@ package paths
 import (
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -38,5 +39,20 @@ func TestPlatformDefaults(t *testing.T) {
 	}
 	if got, err := State(); err != nil || got != wantState {
 		t.Errorf("State = %q, %v; want %q", got, err, wantState)
+	}
+}
+
+func TestRuntimeFitsASocket(t *testing.T) {
+	short := filepath.Join(string(filepath.Separator)+"run", "user", "1000")
+	t.Setenv("XDG_RUNTIME_DIR", short)
+	if got, _ := Runtime(); got != filepath.Join(short, "rimor") {
+		t.Errorf("Runtime = %q", got)
+	}
+
+	// Too deep for a socket: the next choice, still short enough.
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(t.TempDir(), strings.Repeat("d", 100)))
+	got, _ := Runtime()
+	if strings.Contains(got, "ddd") || len(got) > MaxSocketDir {
+		t.Errorf("Runtime = %q (%d bytes)", got, len(got))
 	}
 }

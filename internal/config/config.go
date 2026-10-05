@@ -38,6 +38,9 @@ type Settings struct {
 	// ResultMemoryMB caps the memory a result's rows take; fetching stops
 	// there, keeping the rows so far.
 	ResultMemoryMB int `toml:"result_memory_mb"`
+	// Agent lets AI agents connected through "rimor mcp" read the catalog
+	// and open query tabs; they never run anything.
+	Agent bool `toml:"agent"`
 	// Keys replaces the bindings of the named actions.
 	Keys map[string][]string `toml:"keys"`
 }
@@ -75,7 +78,7 @@ var Actions = []Action{
 
 // Defaults are the settings used for anything config.toml leaves out.
 func Defaults() Settings {
-	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512}
+	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512, Agent: true}
 }
 
 // Bindings returns the keys of every action: the defaults, replaced by
@@ -209,6 +212,11 @@ func Template() string {
 # and fetching stops at this limit, keeping what arrived; esc stops sooner.
 `)
 	fmt.Fprintf(&b, "# result_memory_mb = %d\n\n", d.ResultMemoryMB)
+	b.WriteString(`# Let AI agents (Claude Code or another MCP client, through "rimor mcp")
+# read the catalog of your connections, but not their credentials, and
+# open query tabs. Agents never run anything: you review and run the tab.
+`)
+	fmt.Fprintf(&b, "# agent = %t\n\n", d.Agent)
 	b.WriteString(`# App-wide shortcuts. Binding an action replaces all of its default keys.
 # "leader x" means the leader key, then x. Keys inside panes (the editor,
 # the explorer, the results grid) are not remappable yet.

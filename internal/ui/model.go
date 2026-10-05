@@ -225,6 +225,9 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.saveSession()
 		return nil
 
+	case AgentRequestMsg:
+		return m.agentRequest(msg)
+
 	case runDoneMsg, rowsMsg:
 		return m.query.Update(msg)
 

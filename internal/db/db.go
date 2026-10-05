@@ -167,6 +167,7 @@ const (
 	KindIndex
 	KindTrigger
 	KindColumn
+	KindForeignKey
 )
 
 // Object is one node of the catalog hierarchy.
