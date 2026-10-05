@@ -69,6 +69,7 @@ var Actions = []Action{
 	{"run", "Run the selection, or the whole tab", []string{"ctrl+enter", "f5", "alt+enter", "leader enter"}},
 	{"new_tab", "New query tab", []string{"ctrl+t", "leader t"}},
 	{"open_file", "Open a .sql file", []string{"ctrl+o", "leader o"}},
+	{"agent_results", "Let the agent read this tab's results, or stop it", []string{"alt+a", "leader a"}},
 	{"grow_explorer", "Widen the explorer", []string{"alt+shift+right", "leader right", "leader l"}},
 	{"shrink_explorer", "Narrow the explorer", []string{"alt+shift+left", "leader left", "leader h"}},
 	{"grow_query", "Make the query editor taller", []string{"alt+shift+down", "leader down", "leader j"}},

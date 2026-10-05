@@ -72,7 +72,8 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   Any pane can go full screen.
 - **AI agents.** An agent such as Claude Code, in another terminal, can
   read your catalog and open query tabs for you to review and run. It never
-  runs anything, and never sees credentials or result rows.
+  runs anything or sees credentials, and sees result rows only of the tabs
+  you share with `alt+a`.
 - **Keys at hand.** `F1` lists the keys that apply where you are, with
   your own bindings, and filters them as you type.
 - **Configurable.** Shortcuts can be remapped, and a leader key gives every
@@ -188,6 +189,8 @@ folder). With rimor closed, the agent is told to ask you to start it.
 | `open_query` | Opens a tab with its SQL, on a connection and database, and shows it to you |
 | `update_query` | Revises a tab it opened; `ctrl+z` brings back the previous version |
 | `list_tabs`, `read_tab` | Your tabs, their SQL and selection, and how the last run went |
+| `wait_for_run` | Waits until you run a tab, then reports how it went |
+| `read_results` | The rows of a tab whose results you shared, a page at a time |
 
 What the agent does not get:
 
@@ -195,16 +198,37 @@ What the agent does not get:
   other. Read-only connections still refuse writes.
 - **No credentials.** Not the connection string, host, user, password or
   SQLite file path: only the names you gave the connections.
-- **No result rows.** After you run a tab, `read_tab` says whether it failed,
-  with the database's message, code and position, or which columns and how
-  many rows it returned. PostgreSQL error details are left out, since they
-  can quote row values; SQL Server's messages can still quote a key value,
-  as in a duplicate-key error.
+- **No result rows, unless you share them.** After you run a tab, the agent
+  learns whether it failed, with the database's message, code and position,
+  or which columns and how many rows it returned. PostgreSQL error details
+  are left out, since they can quote row values; SQL Server's messages can
+  still quote a key value, as in a duplicate-key error.
 - **Not your tabs.** It can revise only the tabs it opened, and only until
   you edit them.
 
-The agent does read your catalog, comments included, and its model provider
-sees what it reads. To turn agent access off, set `agent = false` in
+### Sharing results
+
+Some work takes many queries, such as finding why a SQL Server instance
+slowed down. Instead of copying each query in and each result back out,
+press `alt+a` on the tab (or `ctrl+g` then `a`) to let the agent read its
+results. The agent can also ask, which shows in the tab's status line.
+Then the loop is: the agent revises the tab, you read the query and run it,
+and `wait_for_run` hands the agent the outcome and the first rows. You
+still review and run every query.
+
+- The permission is for one tab, and only until you close the tab, change
+  where it runs, quit rimor, or press `alt+a` again. It is never saved, and
+  the status line says `agent reads results` while it lasts.
+- `read_results` returns pages of 100 rows by default and 500 at most,
+  about 64 KB at a time, with cells over 1 KB cut.
+- When the agent's SQL may write (`UPDATE`, `DROP`, `EXEC` and the like), the
+  reminder under it turns into a warning. For diagnostics, a read-only
+  connection makes sure nothing can.
+- rimor shows only the first result set of a batch, so the agent runs one
+  query at a time.
+
+Rows you share go to the agent's model provider, like everything the agent
+reads. It also reads your catalog, comments included. To turn agent access off, set `agent = false` in
 `config.toml`.
 
 ## Keys
@@ -229,6 +253,7 @@ on its own to list them.
 | `ctrl+o` | Open a `.sql` file |
 | `alt+shift+←/→` `alt+shift+↑/↓` | Resize the explorer / the query editor |
 | `alt+=` | Reset pane sizes |
+| `alt+a` | Let the agent read this tab's results, or stop it |
 | `ctrl+q` | Quit |
 
 **Explorer:** `j`/`k` or the arrows move, `enter`/`l` expands, `h` collapses,

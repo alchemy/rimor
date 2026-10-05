@@ -67,6 +67,10 @@ type tab struct {
 	// editor is still at agentVersion, the version it last wrote.
 	agent        bool
 	agentVersion int
+	// shareResults lets the agent read the tab's results; only the user
+	// grants it (alt+a), and it ends with the tab or a change of context.
+	// wantResults records that the agent asked. Neither is saved.
+	shareResults, wantResults bool
 
 	// Statements run on a connection of their own, opened on first run.
 	session    *sql.Conn
@@ -97,6 +101,7 @@ func (t *tab) setContext(ctx queryContext) {
 		return
 	}
 	t.ctx = ctx
+	t.shareResults = false // granted for the server it ran on
 	t.ed.SetLanguage(ctx.language())
 	if !t.cancelRun() {
 		t.dropSession() // a running statement drops it when it returns
@@ -134,6 +139,7 @@ type QueryPane struct {
 	notice        string // shown in the footer until the next key
 	spinner       spinner.Model
 	runKey        string // the run key for hints, as the terminal reports it
+	shareKey      string // the key that lets the agent read results
 	memoryLimit   int64  // bytes a result's rows may take
 }
 
@@ -438,12 +444,22 @@ func (q *QueryPane) Tabs(width int, focused bool) string {
 	return ansi.Truncate(s, width, "…")
 }
 
-// Status is the active tab's context, for the bottom border.
+// Status is the active tab's context, for the bottom border, and whether
+// the agent may read its results.
 func (q *QueryPane) Status() string {
-	if t := q.current(); t != nil {
-		return t.ctx.render()
+	t := q.current()
+	if t == nil {
+		return ""
 	}
-	return ""
+	s := t.ctx.render()
+	ic := iconAgent.String()
+	switch {
+	case t.shareResults:
+		s += mutedStyle.Render(" · ") + accentStyle.Render(ic+" agent reads results")
+	case t.wantResults && q.shareKey != "":
+		s += mutedStyle.Render(" · "+ic+" agent asks for results: ") + accentStyle.Render(q.shareKey)
+	}
+	return s
 }
 
 // Footer shows the latest notice, or the cursor position and key hints.

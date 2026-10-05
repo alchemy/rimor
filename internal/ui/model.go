@@ -46,6 +46,7 @@ type Model struct {
 
 	keys         keymap
 	help         *helpOverlay // the key help, over everything; nil when closed
+	waiters      []*runWaiter // agents waiting for a tab's run to end
 	leader       bool         // the leader key was pressed; the next key picks an action
 	leaderRepeat bool         // a resize step ran; further steps need no new leader
 
@@ -131,6 +132,7 @@ func (m *Model) setFocus(f focus) {
 func (m *Model) updateRunHint() {
 	key := keyHint(m.keys.first("run", m.disambiguated))
 	m.query.runKey, m.results.runKey = key, key
+	m.query.shareKey = keyHint(m.keys.first("agent_results", m.disambiguated))
 }
 
 // setFullScreen shows only the focused pane, over the whole screen.
@@ -229,7 +231,12 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.agentRequest(msg)
 
 	case runDoneMsg, rowsMsg:
-		return m.query.Update(msg)
+		cmd := m.query.Update(msg)
+		m.checkWaiters()
+		return cmd
+	case waitTimeoutMsg:
+		m.waitTimedOut(msg.w)
+		return nil
 
 	// The cell popup.
 	case openCellMsg:

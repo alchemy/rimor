@@ -66,11 +66,11 @@ func TestMCPHandshakeAndTools(t *testing.T) {
 			t.Errorf("%s: input schema is not an object", tm["name"])
 		}
 	}
-	if got := strings.Join(names, " "); got != "list_connections list_objects search_objects describe open_query update_query list_tabs read_tab" {
+	if got := strings.Join(names, " "); got != "list_connections list_objects search_objects describe open_query update_query list_tabs read_tab wait_for_run read_results" {
 		t.Errorf("tools: %s", got)
 	}
 	for _, name := range names {
-		if strings.Contains(name, "run") || strings.Contains(name, "exec") {
+		if strings.HasPrefix(name, "run") || strings.HasPrefix(name, "exec") || strings.Contains(name, "execute") {
 			t.Errorf("a tool that sounds like it runs SQL: %s", name)
 		}
 	}

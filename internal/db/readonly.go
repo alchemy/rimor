@@ -15,6 +15,21 @@ var writeWords = map[string]bool{
 	"DBCC": true, "RECONFIGURE": true, "SHUTDOWN": true, "KILL": true,
 }
 
+// alsoWrites are PostgreSQL statements that write, which T-SQL lacks.
+var alsoWrites = map[string]bool{"CALL": true, "COPY": true, "VACUUM": true, "REINDEX": true, "CLUSTER": true, "REFRESH": true}
+
+// MayWrite returns the first word that suggests the SQL writes (data,
+// schema, permissions, or code that might), or "". Like CheckReadOnly it
+// errs on the side of warning.
+func MayWrite(query string) string {
+	for _, w := range sqlWords(query) {
+		if writeWords[w] || alsoWrites[w] {
+			return w
+		}
+	}
+	return ""
+}
+
 // CheckReadOnly refuses SQL that may write, for read-only connections on
 // SQL Server, which has no session-level read-only mode. It looks at
 // every word outside comments, strings and quoted names, so it errs on the

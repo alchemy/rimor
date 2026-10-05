@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -249,5 +250,200 @@ func TestAgentTabSurvivesRestart(t *testing.T) {
 	}
 	if q.tabs[0].ed.Version() != q.tabs[0].agentVersion {
 		t.Error("the agent can no longer revise its restored tab")
+	}
+}
+
+// request sends a tool call without running the command it returns: the
+// timer of wait_for_run, which a test fires itself.
+func (d *driver) request(tool, args string) <-chan AgentReply {
+	reply := make(chan AgentReply, 1)
+	next, _ := d.m.Update(AgentRequestMsg{Tool: tool, Args: json.RawMessage(args), Reply: reply})
+	d.m = next.(Model)
+	return reply
+}
+
+func received(t *testing.T, reply <-chan AgentReply) (string, error) {
+	t.Helper()
+	select {
+	case r := <-reply:
+		if r.Err != nil {
+			return "", r.Err
+		}
+		out, _ := json.Marshal(r.Result)
+		return string(out), nil
+	case <-time.After(5 * time.Second):
+		t.Fatal("no reply")
+		return "", nil
+	}
+}
+
+func pending(reply <-chan AgentReply) bool { return len(reply) == 0 }
+
+const joinSQL = "SELECT o.id, c.name FROM orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.id"
+
+func TestAgentResultsNeedTheUsersGrant(t *testing.T) {
+	d := agentDriver(t)
+	got := d.mustCall("open_query", `{"connection":"ERP","sql":"`+joinSQL+`","want_results":true}`)
+	requireIn(t, got, `"results":"requested`)
+	requireIn(t, d.screen(), "✶ The agent wrote this query · F5 to run", "agent asks for results: alt+a")
+
+	d.key("ctrl+enter")
+	d.settle()
+	if _, err := d.call("read_results", ""); err == nil || !strings.Contains(err.Error(), "press alt+a") {
+		t.Fatalf("read without a grant: %v", err)
+	}
+	requireIn(t, d.mustCall("list_tabs", ""), `"results_requested":true`)
+
+	// The user allows it.
+	d.key("alt+a")
+	requireIn(t, d.screen(), "✶ agent reads results", "Results shared with the agent · alt+a stops")
+	got = d.mustCall("read_results", "")
+	requireIn(t, got, `"rows":[["10","Secret Customer SpA"],["11","Secret Customer SpA"]]`, `"status":"done"`)
+	if strings.Contains(got, "next_offset") {
+		t.Errorf("a next page after the last row: %s", got)
+	}
+	got = d.mustCall("read_results", `{"offset":1,"limit":1}`)
+	requireIn(t, got, `"offset":1,"rows":[["11","Secret Customer SpA"]]`)
+	got = d.mustCall("read_results", `{"limit":1}`)
+	requireIn(t, got, `"next_offset":1`)
+
+	// Moving the tab to another connection ends the grant.
+	id := d.m.query.current().id
+	b, _ := json.Marshal(map[string]any{"tab": id, "sql": joinSQL, "connection": "archive"})
+	d.mustCall("update_query", string(b))
+	if _, err := d.call("read_results", ""); err == nil {
+		t.Error("the grant survived a change of connection")
+	}
+
+	// And the key takes it back.
+	d.key("alt+a")
+	if !d.m.query.current().shareResults {
+		t.Fatal("alt+a did not grant")
+	}
+	d.key("alt+a")
+	if _, err := d.call("read_results", ""); err == nil {
+		t.Error("alt+a did not revoke")
+	}
+}
+
+func TestAgentResultPagesAreCapped(t *testing.T) {
+	d := agentDriver(t)
+	d.mustCall("open_query", `{"connection":"ERP","sql":"WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 1000) SELECT i, replace(hex(zeroblob(1500)), '0', 'é') AS big FROM c"}`)
+	d.key("alt+a", "ctrl+enter")
+	d.settle()
+
+	var page struct {
+		Page struct {
+			Rows       [][]*string `json:"rows"`
+			NextOffset *int        `json:"next_offset"`
+			CutCells   string      `json:"cut_cells"`
+		} `json:"page"`
+	}
+	json.Unmarshal([]byte(d.mustCall("read_results", `{"limit":500}`)), &page)
+	n := len(page.Page.Rows)
+	if n == 0 || n >= 100 || page.Page.NextOffset == nil || *page.Page.NextOffset != n {
+		t.Fatalf("a page of 1 KB cells: %d rows, next %v", n, page.Page.NextOffset)
+	}
+	cell := *page.Page.Rows[0][1]
+	if len(cell) > maxCellBytes+len("…") || !strings.HasSuffix(cell, "…") || page.Page.CutCells == "" {
+		t.Errorf("cell of %d bytes, cut note %q", len(cell), page.Page.CutCells)
+	}
+	if !utf8.ValidString(cell) {
+		t.Error("a character was cut in half")
+	}
+
+	d.runSQL("WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 1000) SELECT i, NULL AS empty FROM c")
+	if r := d.m.query.current().run; r.err != nil || r.res == nil || r.res.Rows == nil {
+		t.Fatalf("second run: err %+v, res %+v, text %q", r.err, r.res, d.m.query.current().ed.Text())
+	}
+	d.settle()
+	var small, capped struct {
+		Page struct {
+			Rows [][]*string `json:"rows"`
+		} `json:"page"`
+	}
+	json.Unmarshal([]byte(d.mustCall("read_results", "")), &small)
+	if len(small.Page.Rows) != 100 || small.Page.Rows[0][1] != nil {
+		t.Errorf("default page: %d rows, null as %v", len(small.Page.Rows), small.Page.Rows[0][1])
+	}
+	json.Unmarshal([]byte(d.mustCall("read_results", `{"limit":10000}`)), &capped)
+	if len(capped.Page.Rows) != 500 {
+		t.Errorf("limit above the cap: %d rows", len(capped.Page.Rows))
+	}
+}
+
+func TestAgentWaitsForTheUsersRun(t *testing.T) {
+	d := agentDriver(t)
+	d.mustCall("open_query", `{"connection":"ERP","sql":"`+joinSQL+`"}`)
+
+	reply := d.request("wait_for_run", "")
+	if !pending(reply) {
+		t.Fatal("answered before the user ran the tab")
+	}
+	d.key("ctrl+enter")
+	d.settle()
+	got, err := received(t, reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireIn(t, got, `"status":"done"`, `"rows":2`, `"results":"not shared`)
+	if strings.Contains(got, "Secret") {
+		t.Errorf("rows without a grant: %s", got)
+	}
+
+	// With the grant, the answer brings the first rows.
+	d.key("alt+a")
+	reply = d.request("wait_for_run", `{"timeout_seconds":5}`)
+	d.key("ctrl+enter")
+	d.settle()
+	got, _ = received(t, reply)
+	requireIn(t, got, `"page":{"offset":0,"rows":[["10","Secret Customer SpA"]`)
+
+	// Nobody runs it: the timer ends the wait.
+	reply = d.request("wait_for_run", "")
+	d.send(waitTimeoutMsg{d.m.waiters[len(d.m.waiters)-1]})
+	got, _ = received(t, reply)
+	requireIn(t, got, `"status":"not run yet"`)
+	if len(d.m.waiters) != 0 {
+		t.Errorf("%d waiters left", len(d.m.waiters))
+	}
+
+	// The tab goes away.
+	reply = d.request("wait_for_run", "")
+	w := d.m.waiters[0]
+	d.m.query.Close(d.m.query.current())
+	d.send(waitTimeoutMsg{w})
+	if _, err := received(t, reply); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Errorf("closed tab: %v", err)
+	}
+}
+
+func TestAgentWarnsAboutWrites(t *testing.T) {
+	d := agentDriver(t)
+	got := d.mustCall("open_query", `{"connection":"ERP","sql":"-- tidy up\nDELETE FROM orders WHERE id = 10"}`)
+	requireIn(t, got, `"warning":"The user was warned that this SQL may write (DELETE)."`)
+	requireIn(t, d.screen(), "⚠ This query may write (DELETE) · review it, then F5 to run")
+
+	// Words in comments and strings do not count.
+	got = d.mustCall("open_query", `{"connection":"ERP","sql":"-- no DELETE here\nSELECT 'DROP' AS word"}`)
+	if strings.Contains(got, "warning") {
+		t.Errorf("warned about a SELECT: %s", got)
+	}
+}
+
+func TestAgentErrorDetail(t *testing.T) {
+	failed := func(d db.Driver, shared bool) map[string]any {
+		tb := &tab{ctx: queryContext{conn: newConnection(db.Config{Driver: d})}, shareResults: shared,
+			run: &run{err: &db.Error{Message: "failed", Detail: "Key (email)=(a@b.c) already exists."}}}
+		return tb.runOutcome()["error"].(map[string]any)
+	}
+	if _, ok := failed(db.Postgres, false)["detail"]; ok {
+		t.Error("a PostgreSQL detail, which can quote rows, reached the agent without a grant")
+	}
+	if _, ok := failed(db.Postgres, true)["detail"]; !ok {
+		t.Error("no detail with the results shared")
+	}
+	if _, ok := failed(db.SQLServer, false)["detail"]; !ok {
+		t.Error("no SQL Server detail: the batch's earlier messages explain the error")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -41,6 +42,11 @@ type agentArgs struct {
 	SQL        string `json:"sql"`
 	Title      string `json:"title"`
 	Tab        *int   `json:"tab"`
+	// Results: who asks, and which rows.
+	WantResults bool `json:"want_results"`
+	Offset      int  `json:"offset"`
+	Limit       int  `json:"limit"`
+	Timeout     int  `json:"timeout_seconds"`
 }
 
 const (
@@ -75,6 +81,11 @@ func (m *Model) agentRequest(msg AgentRequestMsg) tea.Cmd {
 	case "update_query":
 		reply(m.agentUpdate(a))
 		return nil
+	case "read_results":
+		reply(m.agentReadResults(a))
+		return nil
+	case "wait_for_run":
+		return m.agentWait(a, reply)
 	}
 
 	// Catalog tools: resolve the connection here, query in the background.
@@ -320,11 +331,15 @@ type agentTab struct {
 	ByAgent    bool   `json:"opened_by_agent,omitempty"`
 	Current    bool   `json:"current,omitempty"`
 	Unsaved    bool   `json:"unsaved,omitempty"`
+	// Results the agent may read (read_results), or has asked for.
+	ResultsShared    bool `json:"results_shared,omitempty"`
+	ResultsRequested bool `json:"results_requested,omitempty"`
 }
 
 func (m *Model) describeTab(t *tab) agentTab {
 	a := agentTab{ID: t.id, Title: t.title(), Database: t.ctx.database, ByAgent: t.agent,
-		Current: t == m.query.current(), Unsaved: t.dirty()}
+		Current: t == m.query.current(), Unsaved: t.dirty(),
+		ResultsShared: t.shareResults, ResultsRequested: t.wantResults && !t.shareResults}
 	if t.ctx.conn != nil {
 		a.Connection = t.ctx.conn.cfg().Name
 	}
@@ -364,15 +379,26 @@ func (m *Model) agentReadTab(a agentArgs) (any, error) {
 		out["selection"] = sel
 	}
 	if t.run != nil {
-		out["last_run"] = runOutcome(t.run)
+		out["last_run"] = t.runOutcome()
 	}
 	return out, nil
 }
 
-// runOutcome is what an agent learns of a run: how it ended, never the
-// rows. A PostgreSQL error's detail is left out, since it may quote them
-// ("Key (email)=(…) already exists").
-func runOutcome(r *run) map[string]any {
+// runOutcome is what an agent learns of the tab's last run: how it
+// ended, never the rows. A PostgreSQL error's detail is left out unless
+// the tab's results are shared, since it may quote them ("Key (email)=(…)
+// already exists"); SQL Server's holds the batch's earlier messages, such
+// as the permission that was missing.
+func (t *tab) runOutcome() map[string]any {
+	conn := t.sessionCtx.conn
+	if conn == nil {
+		conn = t.ctx.conn
+	}
+	detail := t.shareResults || (conn != nil && conn.cfg().Driver != db.Postgres)
+	return runOutcome(t.run, detail)
+}
+
+func runOutcome(r *run, detail bool) map[string]any {
 	out := map[string]any{"statement": r.query}
 	if r.line > 0 {
 		out["statement_line"] = r.line + 1 // where a selection started
@@ -389,6 +415,9 @@ func runOutcome(r *run) map[string]any {
 		}
 		if r.err.Hint != "" {
 			e["hint"] = r.err.Hint
+		}
+		if detail && r.err.Detail != "" {
+			e["detail"] = r.err.Detail
 		}
 		if r.err.Line > 0 {
 			e["line"] = r.err.Line
@@ -465,7 +494,7 @@ func (m *Model) agentOpen(a agentArgs) (any, error) {
 	}
 	q := &m.query
 	t := q.newTab(ctx)
-	t.name, t.agent = agentTitle(a.Title, q.tabs), true
+	t.name, t.agent, t.wantResults = agentTitle(a.Title, q.tabs), true, a.WantResults
 	t.ed.SetText(a.SQL)
 	t.agentVersion = t.ed.Version()
 	// An untouched empty tab is replaced rather than kept around.
@@ -477,8 +506,7 @@ func (m *Model) agentOpen(a agentArgs) (any, error) {
 		q.insert(t)
 	}
 	m.showAgentTab(t, "wrote")
-	return map[string]any{"tab": t.id, "title": t.title(),
-		"note": "Not executed: the user reviews the tab and runs it."}, nil
+	return m.agentHandover(t), nil
 }
 
 func (m *Model) agentUpdate(a agentArgs) (any, error) {
@@ -507,21 +535,245 @@ func (m *Model) agentUpdate(a agentArgs) (any, error) {
 	}
 	t.ed.ReplaceText(a.SQL)
 	t.agentVersion = t.ed.Version()
+	t.wantResults = t.wantResults || a.WantResults
 	q := &m.query
 	q.selectTab(slices.Index(q.tabs, t))
 	m.showAgentTab(t, "revised")
-	return map[string]any{"tab": t.id, "title": t.title(),
-		"note": "Not executed: the user reviews the tab and runs it."}, nil
+	return m.agentHandover(t), nil
+}
+
+// agentHandover is what open_query and update_query answer.
+func (m *Model) agentHandover(t *tab) map[string]any {
+	out := map[string]any{"tab": t.id, "title": t.title(),
+		"note": "Not executed: the user reviews the tab and runs it. wait_for_run tells you when they have."}
+	if w := db.MayWrite(t.ed.Text()); w != "" {
+		out["warning"] = "The user was warned that this SQL may write (" + w + ")."
+	}
+	switch {
+	case t.shareResults:
+		out["results"] = "shared: read_results can read this tab's rows"
+	case t.wantResults:
+		out["results"] = "requested: the user was asked to allow reading this tab's rows"
+	}
+	return out
 }
 
 // showAgentTab brings the agent's tab to the user, with a reminder that
-// running it is up to them.
+// running it is up to them, a warning when the SQL may write, and the
+// agent's request to read the results.
 func (m *Model) showAgentTab(t *tab, verb string) {
 	if m.modal == nil && m.help == nil {
 		m.setFocus(focusQuery)
 	}
-	m.query.notice = accentStyle.Render(iconAgent.String()+" The agent "+verb+" this query") +
+	// Short enough to fit beside the status line, which shows the agent's
+	// request to read results.
+	ic := iconAgent.String()
+	if w := db.MayWrite(t.ed.Text()); w != "" {
+		m.query.notice = errorStyle.Render("⚠ This query may write ("+w+")") +
+			mutedStyle.Render(" · review it, then "+m.query.runKey+" to run")
+		return
+	}
+	if t.wantResults && !t.shareResults {
+		m.query.notice = accentStyle.Render(ic+" The agent "+verb+" this query") +
+			mutedStyle.Render(" · "+m.query.runKey+" to run")
+		return
+	}
+	m.query.notice = accentStyle.Render(ic+" The agent "+verb+" this query") +
 		mutedStyle.Render(" · review it, then "+m.query.runKey+" to run")
+}
+
+// toggleAgentResults lets the agent read the current tab's results, or
+// stops it: the alt+a action.
+func (m *Model) toggleAgentResults() {
+	t := m.query.current()
+	if t == nil {
+		return
+	}
+	t.shareResults, t.wantResults = !t.shareResults, false
+	if t.shareResults {
+		m.query.notice = accentStyle.Render("Results shared with the agent") +
+			mutedStyle.Render(" · "+m.query.shareKey+" stops")
+	} else {
+		m.query.notice = mutedStyle.Render("The agent can no longer read the results")
+	}
+}
+
+// Result pages for the agent: rows, cells and bytes are capped so that a
+// large result cannot flood its context.
+const (
+	pageRows     = 100
+	maxPageRows  = 500
+	maxCellBytes = 1024
+	maxPageBytes = 64 << 10
+)
+
+// resultPage reads rows from offset: at most limit, and fewer when they
+// pass maxPageBytes. A NULL is null; long cells are cut and counted.
+func resultPage(set *db.RowSet, offset, limit int) map[string]any {
+	if limit <= 0 {
+		limit = pageRows
+	}
+	limit = min(limit, maxPageRows)
+	offset = max(offset, 0)
+	n, cols := set.Len(), len(set.Columns())
+	rows := [][]any{}
+	bytes, cut, next := 0, 0, offset
+	for ; next < n && next < offset+limit; next++ {
+		row := make([]any, cols)
+		size := 0
+		for c := range cols {
+			v := set.Cell(next, c)
+			if v.Null {
+				size += 4
+				continue
+			}
+			text := v.Text
+			if len(text) > maxCellBytes {
+				text = truncateBytes(text, maxCellBytes) + "…"
+				cut++
+			}
+			row[c] = text
+			size += len(text) + 3
+		}
+		if bytes+size > maxPageBytes && len(rows) > 0 {
+			break
+		}
+		bytes += size
+		rows = append(rows, row)
+	}
+	out := map[string]any{"offset": offset, "rows": rows}
+	if next < n || !set.Progress().Done {
+		out["next_offset"] = next
+	}
+	if cut > 0 {
+		out["cut_cells"] = fmt.Sprintf("%d cells were longer than %d bytes and are cut, ending in …", cut, maxCellBytes)
+	}
+	return out
+}
+
+// truncateBytes cuts s to at most n bytes, on a character boundary.
+func truncateBytes(s string, n int) string {
+	for n > 0 && n < len(s) && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// errNotShared tells the agent how to get the rows.
+func (m *Model) errNotShared() error {
+	key := m.query.shareKey
+	if key == "" {
+		key = "the agent_results key"
+	}
+	return errors.New("the user has not let you read this tab's results: ask them to press " + key +
+		" in rimor, or revise the tab with want_results to ask in rimor itself")
+}
+
+func (m *Model) agentReadResults(a agentArgs) (any, error) {
+	t, err := m.agentTab(a.Tab)
+	if err != nil {
+		return nil, err
+	}
+	if !t.shareResults {
+		return nil, m.errNotShared()
+	}
+	return m.tabResults(t, a.Offset, a.Limit)
+}
+
+// tabResults is the outcome of a shared tab's last run with a page of its
+// rows.
+func (m *Model) tabResults(t *tab, offset, limit int) (map[string]any, error) {
+	r := t.run
+	if r == nil {
+		return nil, errors.New("the tab has not run yet: the user runs it; wait_for_run waits for that")
+	}
+	out := t.runOutcome()
+	if r.res != nil && r.res.HasRows() && !r.running {
+		out["page"] = resultPage(r.res.Rows, offset, limit)
+	}
+	return out, nil
+}
+
+// runWaiter is an agent waiting for a tab's run number gen to end.
+type runWaiter struct {
+	tab   *tab
+	gen   int
+	reply func(any, error)
+	done  bool
+}
+
+type waitTimeoutMsg struct{ w *runWaiter }
+
+const maxWait = 60 * time.Second
+
+// agentWait answers once the tab's current run ends, or the next one the
+// user starts, or after the timeout.
+func (m *Model) agentWait(a agentArgs, reply func(any, error)) tea.Cmd {
+	t, err := m.agentTab(a.Tab)
+	if err != nil {
+		reply(nil, err)
+		return nil
+	}
+	w := &runWaiter{tab: t, gen: t.runs + 1, reply: reply}
+	if t.run.busy() {
+		w.gen = t.run.gen
+	}
+	m.waiters = append(m.waiters, w)
+	wait := maxWait
+	if a.Timeout > 0 {
+		wait = min(time.Duration(a.Timeout)*time.Second, maxWait)
+	}
+	return tea.Tick(wait, func(time.Time) tea.Msg { return waitTimeoutMsg{w} })
+}
+
+// checkWaiters answers the agents whose run has ended.
+func (m *Model) checkWaiters() {
+	kept := m.waiters[:0]
+	for _, w := range m.waiters {
+		t := w.tab
+		switch {
+		case w.done:
+			continue
+		case t.closed:
+			w.finish(nil, errors.New("the user closed the tab"))
+			continue
+		case t.run != nil && t.run.gen >= w.gen && !t.run.busy():
+			w.finish(m.runReport(t))
+			continue
+		}
+		kept = append(kept, w)
+	}
+	m.waiters = kept
+}
+
+func (m *Model) waitTimedOut(w *runWaiter) {
+	m.checkWaiters()
+	if w.done {
+		return
+	}
+	if w.tab.closed {
+		w.finish(nil, errors.New("the user closed the tab"))
+	} else {
+		w.finish(map[string]any{"status": "not run yet",
+			"note": "The user has not run the tab yet. Call wait_for_run again to keep waiting."}, nil)
+	}
+	m.checkWaiters() // drops it
+}
+
+func (w *runWaiter) finish(result any, err error) {
+	w.done = true
+	w.reply(result, err)
+}
+
+// runReport is what wait_for_run answers: the outcome, with the first
+// rows when the tab's results are shared.
+func (m *Model) runReport(t *tab) (any, error) {
+	if t.shareResults {
+		return m.tabResults(t, 0, pageRows)
+	}
+	out := t.runOutcome()
+	out["results"] = "not shared: " + m.errNotShared().Error()
+	return out, nil
 }
 
 // agentTitle makes a tab name from the agent's title: one short line,

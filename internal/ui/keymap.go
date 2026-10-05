@@ -142,6 +142,8 @@ func (m *Model) do(action string) tea.Cmd {
 			t = &tab{}
 		}
 		return func() tea.Msg { return promptPathMsg{purpose: pathOpen, tab: t} }
+	case "agent_results":
+		m.toggleAgentResults()
 	case "grow_explorer", "shrink_explorer", "grow_query", "shrink_query", "reset_layout":
 		m.resizeAction(action)
 	}
