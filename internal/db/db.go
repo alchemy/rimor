@@ -89,6 +89,11 @@ type Config struct {
 	// (query_only); on SQL Server, which has no such session setting,
 	// rimor refuses statements that write (see CheckReadOnly).
 	ReadOnly bool `json:"read_only,omitempty"`
+	// Secret is "keychain" when the password is in the system keychain
+	// rather than in DSN (see Store). Loading puts it back in DSN, or sets
+	// SecretErr when it cannot, which connecting then reports.
+	Secret    string `json:"secret,omitempty"`
+	SecretErr error  `json:"-"`
 }
 
 // HasDatabases reports whether one connection reaches several databases.
@@ -103,6 +108,9 @@ func Open(ctx context.Context, cfg Config) (*sql.DB, error) {
 // OpenDatabase connects to a specific database of the connection's server;
 // an empty name means the default database of the DSN.
 func OpenDatabase(ctx context.Context, cfg Config, database string) (*sql.DB, error) {
+	if cfg.SecretErr != nil {
+		return nil, cfg.SecretErr
+	}
 	dsn := strings.TrimSpace(cfg.DSN)
 	var conn *sql.DB
 	switch cfg.Driver {

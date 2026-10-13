@@ -153,8 +153,20 @@ passwords (`@` is `%40`). For SQL Server, the URL path names an *instance*,
 not a database; the database goes in `?database=`. Add
 `&TrustServerCertificate=true` for servers with self-signed certificates.
 
-Connection strings are stored in plain text in `connections.json`, which is
-readable only by you.
+Passwords are kept in the system keychain: Keychain on macOS, Credential
+Manager on Windows, the Secret Service (GNOME Keyring, KWallet) on Linux.
+`connections.json`, readable only by you, keeps each connection string
+without its password, and rimor puts it back when connecting. Passwords
+saved by earlier versions move to the keychain on the first start. Where
+there is no keychain, such as a server without a desktop session, they stay
+in `connections.json`, and rimor says so.
+
+The keychain keeps passwords out of a file that is easy to copy, back up or
+read by mistake. It does not hide them from programs running as you: on
+Linux and macOS those can usually read your unlocked keychain too. A
+connection string without a password also works, when the driver finds one
+elsewhere: `~/.pgpass` or `PGPASSWORD` for PostgreSQL, Windows authentication
+for SQL Server.
 
 Mark a connection **read-only** in the same form. On PostgreSQL the server
 then refuses writes, and on SQLite the engine does. SQL Server has no

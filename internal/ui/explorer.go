@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -481,10 +482,27 @@ func (e *Explorer) save() {
 	for i, r := range e.roots {
 		cfgs[i] = r.conn.cfg()
 	}
-	e.notice = ""
-	if err := e.store.Save(cfgs); err != nil {
-		e.notice = "Could not save connections: " + err.Error()
+	e.notice = storeNotice(e.store.Save(cfgs))
+}
+
+// WithStoreError shows what went wrong moving passwords to the keychain
+// at startup.
+func (m Model) WithStoreError(err error) Model {
+	m.explorer.notice = storeNotice(err)
+	return m
+}
+
+// storeNotice explains a failed save. A keychain that refused a password
+// is not a failure: the file has it, as before keychain support.
+func storeNotice(err error) string {
+	var keychain *db.KeychainError
+	switch {
+	case err == nil:
+		return ""
+	case errors.As(err, &keychain):
+		return keychain.Error()
 	}
+	return "Could not save connections: " + err.Error()
 }
 
 func (e *Explorer) rootOf(conn *connection) *node {

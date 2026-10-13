@@ -76,7 +76,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Passwords saved before keychain support move there now.
+	moved := store.MoveToKeychain()
 	m := ui.New(store, sessionPath, settings)
+	if moved != nil {
+		m = m.WithStoreError(moved)
+	}
 	var srv *agent.Server
 	if settings.Agent {
 		// Without the socket rimor still works; agents just cannot reach it.

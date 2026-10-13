@@ -12,6 +12,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mattn/go-runewidth v0.0.27
 	github.com/microsoft/go-mssqldb v1.11.2
+	github.com/zalando/go-keyring v0.2.8
 	modernc.org/sqlite v1.60.1
 )
 
@@ -24,8 +25,10 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
