@@ -33,6 +33,11 @@ func driverPassword(t *testing.T, d Driver, dsn string) string {
 }
 
 func TestSplitAndJoinPassword(t *testing.T) {
+	// The drivers fall back on these, and CI images set some (Windows:
+	// PGPASSWORD=root); only the connection string may count here.
+	t.Setenv("PGPASSWORD", "")
+	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "none"))
+	t.Setenv("PGSERVICEFILE", filepath.Join(t.TempDir(), "none"))
 	for _, c := range []struct {
 		driver          Driver
 		dsn, clean, pwd string

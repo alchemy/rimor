@@ -71,7 +71,8 @@ func TestResultsSQLite(t *testing.T) {
 	}
 	conn.Close()
 
-	d := queryDriver(t, db.Config{Name: "shop", Driver: db.SQLite, DSN: path}, 0)
+	// Writes to a file can take a while on slow disks (Windows runners).
+	d := queryDriver(t, db.Config{Name: "shop", Driver: db.SQLite, DSN: path}, 5*time.Second)
 
 	s := d.runSQL("SELECT * FROM customer")
 	t.Log("\n" + s)
