@@ -345,7 +345,7 @@ footer.wrap {
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
-<span style="color:#928374">╰</span><span style="color:#928374">─────────────────────────</span><span style="color:#928374">─╯</span><span style="color:#b16286">╰</span><span style="color:#b16286">─</span> <span style="color:#98971a">✓ </span>6 rows<span style="color:#938a74"> · &lt;1 ms</span> <span style="color:#b16286">────────────────────────────</span> <span style="color:#938a74">2/6 · city text</span>  ⏎<span style="color:#938a74"> open</span><span style="color:#938a74"> · </span>y<span style="color:#938a74"> copy</span> <span style="color:#b16286">─╯</span><!-- /screen:terminal --></pre>
+<span style="color:#928374">╰</span><span style="color:#928374">─────────────────────────</span><span style="color:#928374">─╯</span><span style="color:#b16286">╰</span><span style="color:#b16286">─</span> <span style="color:#98971a">✓ </span>6 rows<span style="color:#938a74"> · 1 ms</span> <span style="color:#b16286">─────────────────────────────</span> <span style="color:#938a74">2/6 · city text</span>  ⏎<span style="color:#938a74"> open</span><span style="color:#938a74"> · </span>y<span style="color:#938a74"> copy</span> <span style="color:#b16286">─╯</span><!-- /screen:terminal --></pre>
   </div>
   <div class="wrap themes">
     <fieldset>
@@ -365,14 +365,15 @@ footer.wrap {
         <dd>Your connections and their catalog as a tree: databases, schemas,
           tables, views, functions, indexes, foreign keys and columns with their types. Each
           level loads when you open it, and empty schemas stay out of the way.
-          SQLite tables show their <code>rowid</code>.</dd>
+          Press <kbd>/</kbd> and the tree shrinks to what matches as you type.</dd>
       </div>
       <div>
         <dt>Query tabs</dt>
         <dd>Each tab knows where it runs, a connection and a database, and shows
           it at the bottom. Open a tab from anything in the tree and it starts
-          there. Tabs save to <code>.sql</code> files, and unsaved work is still
-          there the next time you start.</dd>
+          there. Each runs on its own connection, so <code>USE</code>, temp tables
+          and open transactions carry over. Tabs save to <code>.sql</code> files,
+          and unsaved work is still there the next time you start.</dd>
       </div>
       <div>
         <dt>AI agents</dt>
@@ -410,9 +411,11 @@ footer.wrap {
           undo, clipboard and indentation that follows the line above.</dd>
       </div>
       <div>
-        <dt>Sessions</dt>
-        <dd>Every tab runs on its own connection, so <code>USE</code>, temp
-          tables and open transactions carry over from one run to the next.</dd>
+        <dt>Scripts</dt>
+        <dd>Press <kbd>s</kbd> on a table, view, column or routine for ready-made
+          SQL in its own dialect: the first rows, an insert or update to fill in,
+          a call with every parameter. It opens in a new tab and runs when you
+          run it; until you fill it in, it changes nothing.</dd>
       </div>
       <div>
         <dt>Themes</dt>

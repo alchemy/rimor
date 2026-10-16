@@ -38,6 +38,8 @@ type Settings struct {
 	// ResultMemoryMB caps the memory a result's rows take; fetching stops
 	// there, keeping the rows so far.
 	ResultMemoryMB int `toml:"result_memory_mb"`
+	// ScriptRows is the N of the explorer's "first N rows" scripts.
+	ScriptRows int `toml:"script_rows"`
 	// Agent lets AI agents connected through "rimor mcp" read the catalog
 	// and open query tabs; they never run anything.
 	Agent bool `toml:"agent"`
@@ -79,7 +81,7 @@ var Actions = []Action{
 
 // Defaults are the settings used for anything config.toml leaves out.
 func Defaults() Settings {
-	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512, Agent: true}
+	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512, ScriptRows: 100, Agent: true}
 }
 
 // Bindings returns the keys of every action: the defaults, replaced by
@@ -129,6 +131,9 @@ func (s Settings) validate() error {
 	case IconsAuto, IconsNerd, IconsPlain:
 	default:
 		return fmt.Errorf("icons must be %q, %q or %q, not %q", IconsAuto, IconsNerd, IconsPlain, s.Icons)
+	}
+	if s.ScriptRows < 1 {
+		return fmt.Errorf("script_rows must be at least 1, not %d", s.ScriptRows)
 	}
 	if s.ResultMemoryMB < 1 {
 		return fmt.Errorf("result_memory_mb must be at least 1, not %d", s.ResultMemoryMB)
@@ -213,6 +218,9 @@ func Template() string {
 # and fetching stops at this limit, keeping what arrived; esc stops sooner.
 `)
 	fmt.Fprintf(&b, "# result_memory_mb = %d\n\n", d.ResultMemoryMB)
+	b.WriteString(`# Rows the explorer's scripts select (s on a table, view or column).
+`)
+	fmt.Fprintf(&b, "# script_rows = %d\n\n", d.ScriptRows)
 	b.WriteString(`# Let AI agents (Claude Code or another MCP client, through "rimor mcp")
 # read the catalog of your connections, but not their credentials, and
 # open query tabs. Agents never run anything: you review and run the tab.

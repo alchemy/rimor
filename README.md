@@ -40,7 +40,12 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   out, and so are schemas with nothing in them, so a typical SQL Server
   database shows just `dbo`. `.` on a database lists the empty ones too.
   SQLite tables show their `rowid`: the implicit one, or the
-  `INTEGER PRIMARY KEY` column that stands in for it.
+  `INTEGER PRIMARY KEY` column that stands in for it. `/` filters what is
+  loaded by name as you type.
+- **Scripts.** `s` on a table, view, column, foreign key, routine, sequence
+  or index offers ready-made SQL in that database's dialect: the first rows,
+  an insert or update to fill in, a call with every parameter. It opens in
+  a new tab, and runs only when you run it.
 - **Query tabs.** Each tab has a *context*, a connection plus an optional
   database, shown in the pane's bottom border. A new tab takes the context
   of the item selected in the explorer, and `ctrl+e` changes it. Tabs save
@@ -272,6 +277,30 @@ on its own to list them.
 `a` adds a connection, `e` edits it, `d` deletes it, `r` refreshes, `x`
 disconnects, `.` shows or hides a database's empty schemas.
 
+`s` lists the scripts for the object under the cursor, and `S` opens the
+first one straight away:
+
+| Object | Scripts |
+|---|---|
+| Table | select the first rows, count, insert, update or delete a row by its key, add a column, drop (commented out) |
+| View, materialized view | select the first rows, count, drop (commented out) |
+| Column | its most common values |
+| Foreign key | join the two tables; rows whose referenced row is missing |
+| Function, procedure | a call with a `NULL` for each parameter, named and typed |
+| Sequence | its current value; restart |
+| Index | drop (commented out) |
+
+Values to fill in are `NULL`, so a script run as it is changes nothing:
+`WHERE id = NULL` matches no row, and drops are commented out. Inserts leave
+out the columns the database fills in (identity, serial, computed). The
+first-rows scripts select `script_rows` rows, 100 by default.
+
+`/` filters the explorer as you type: it keeps the rows whose names contain
+the text, ignoring case, with the path to each. It covers what is loaded,
+so a schema's tables are found once the schema has been opened.
+`↑`/`↓` move between matches, `enter` goes to one and opens the path to it,
+and `esc` puts the tree back as it was.
+
 **Query:** `ctrl+s` saves, `alt+s` saves as, `ctrl+w` closes the tab,
 `ctrl+pgup/pgdn` or `alt+[`/`alt+]` switch tabs, `ctrl+e` changes the context,
 `esc` cancels a running query.
@@ -315,6 +344,7 @@ theme = "light"         # "auto", "dark", "light" or "terminal"
 icons = "plain"         # "auto", "nerd" or "plain"
 leader = "ctrl+b"
 result_memory_mb = 2048 # memory a query's rows may take
+script_rows = 50        # rows the explorer's select scripts take
 agent = false           # no AI agent access (see AI agents)
 
 [keys]

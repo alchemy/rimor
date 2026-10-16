@@ -61,7 +61,9 @@ func (pg postgres) describe(ctx context.Context, conn *sql.DB, schema, name stri
 		       coalesce(pg_get_expr(d.adbin, d.adrelid), ''),
 		       EXISTS (SELECT 1 FROM pg_index i
 		               WHERE i.indrelid = a.attrelid AND i.indisprimary AND a.attnum = ANY(i.indkey)),
-		       coalesce(col_description(a.attrelid, a.attnum), '')
+		       coalesce(col_description(a.attrelid, a.attnum), ''),
+		       a.attidentity <> '' OR a.attgenerated <> ''
+		           OR coalesce(pg_get_expr(d.adbin, d.adrelid), '') LIKE 'nextval(%'
 		FROM pg_attribute a
 		LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 		WHERE a.attrelid = `+pgRelation+` AND a.attnum > 0 AND NOT a.attisdropped
@@ -72,7 +74,7 @@ func (pg postgres) describe(ctx context.Context, conn *sql.DB, schema, name stri
 	defer rows.Close()
 	for rows.Next() {
 		var c TableColumn
-		if err := rows.Scan(&c.Name, &c.Type, &c.Nullable, &c.Default, &c.PrimaryKey, &c.Comment); err != nil {
+		if err := rows.Scan(&c.Name, &c.Type, &c.Nullable, &c.Default, &c.PrimaryKey, &c.Comment, &c.Auto); err != nil {
 			return nil, err
 		}
 		t.Columns = append(t.Columns, c)

@@ -76,6 +76,15 @@ func (p *Pool) Children(ctx context.Context, parent *Object) ([]Object, error) {
 		if objs[i].Database == "" {
 			objs[i].Database = database
 		}
+		// Columns, indexes and keys know their table, as their folder does.
+		if parent != nil && parent.Kind == KindFolder && parent.Table != "" {
+			if objs[i].Table == "" {
+				objs[i].Table = parent.Table
+			}
+			if objs[i].Schema == "" {
+				objs[i].Schema = parent.Schema
+			}
+		}
 	}
 	return objs, err
 }

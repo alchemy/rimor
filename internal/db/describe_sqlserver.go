@@ -61,7 +61,9 @@ func (ms sqlserver) describe(ctx context.Context, conn *sql.DB, schema, name str
 		           WHERE i.is_primary_key = 1
 		             AND ic.object_id = c.object_id AND ic.column_id = c.column_id
 		       ) THEN 1 ELSE 0 END AS bit),
-		       ISNULL(CAST(ep.value AS nvarchar(max)), N'')
+		       ISNULL(CAST(ep.value AS nvarchar(max)), N''),
+		       CAST(CASE WHEN c.is_identity = 1 OR c.is_computed = 1
+		                   OR t.name IN ('timestamp', 'rowversion') THEN 1 ELSE 0 END AS bit)
 		FROM sys.columns c
 		JOIN sys.types t ON t.user_type_id = c.user_type_id
 		LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
@@ -78,7 +80,7 @@ func (ms sqlserver) describe(ctx context.Context, conn *sql.DB, schema, name str
 		var c TableColumn
 		var typ string
 		var length, precision, scale int
-		if err := rows.Scan(&c.Name, &typ, &length, &precision, &scale, &c.Nullable, &c.Default, &c.PrimaryKey, &c.Comment); err != nil {
+		if err := rows.Scan(&c.Name, &typ, &length, &precision, &scale, &c.Nullable, &c.Default, &c.PrimaryKey, &c.Comment, &c.Auto); err != nil {
 			return nil, err
 		}
 		c.Type = mssqlType(typ, length, precision, scale)

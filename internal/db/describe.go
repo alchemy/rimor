@@ -36,6 +36,9 @@ type TableColumn struct {
 	Comment    string `json:"comment,omitempty"`
 	// Implicit marks SQLite's rowid, which the table has without declaring.
 	Implicit bool `json:"implicit,omitempty"`
+	// Auto marks a column the database fills in: identity, serial,
+	// computed or generated, rowversion, or SQLite's INTEGER PRIMARY KEY.
+	Auto bool `json:"auto,omitempty"`
 }
 
 type TableIndex struct {

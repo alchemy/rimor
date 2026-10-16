@@ -33,9 +33,32 @@ var (
 		{keys: []string{"d", "delete"}, desc: "Delete the connection"},
 		{keys: []string{"r"}, desc: "Refresh what is below the row"},
 		{keys: []string{"x"}, desc: "Disconnect"},
+		{keys: []string{"/"}, desc: "Filter the loaded rows by name"},
+		{keys: []string{"s"}, desc: "Scripts for the object: select, insert, call…", when: func(m *Model) bool {
+			return m.explorer.scriptable()
+		}},
+		{keys: []string{"S"}, desc: "Open the object's first script", when: func(m *Model) bool {
+			return m.explorer.scriptable()
+		}},
 		{keys: []string{"."}, desc: "Show or hide empty schemas", when: func(m *Model) bool {
 			return m.explorer.cursor.database() != nil
 		}},
+	}}
+
+	explorerFilterKeys = keyScope{"Explorer filter", []binding{
+		{keys: []string{"up", "ctrl+p", "ctrl+k", "down", "ctrl+n", "ctrl+j"}, desc: "Previous / next match"},
+		{keys: []string{"pgup", "pgdown"}, desc: "Half a page of matches up / down"},
+		{keys: []string{"enter"}, desc: "Go to the match, opening the path to it"},
+		{keys: []string{"esc"}, desc: "Close the filter; the tree is as before"},
+		{keys: []string{"backspace"}, desc: "Delete a character"},
+		{keys: []string{"ctrl+u"}, desc: "Clear the text"},
+	}}
+
+	scriptMenuKeys = keyScope{"Scripts", []binding{
+		{keys: []string{"up", "k", "down", "j"}, desc: "Move"},
+		{keys: []string{"home", "g", "end", "G"}, desc: "First / last script"},
+		{keys: []string{"enter"}, desc: "Open the script in a new tab; it does not run"},
+		{keys: []string{"esc", "q"}, desc: "Cancel"},
 	}}
 
 	resultsKeys = keyScope{"Results", []binding{
@@ -156,8 +179,8 @@ var (
 // allScopes is every key table, in the order the "all keys" view lists
 // them after the app-wide keys.
 var allScopes = []keyScope{
-	paneKeys, explorerKeys, tabKeys, editorKeys, resultsKeys, cellKeys,
-	connFormKeys, pickerKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
+	paneKeys, explorerKeys, explorerFilterKeys, tabKeys, editorKeys, resultsKeys, cellKeys,
+	connFormKeys, pickerKeys, scriptMenuKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
 }
 
 // hereScopes are the key tables that apply where the user is, and a name
@@ -179,6 +202,11 @@ func (m *Model) hereScopes() (string, []keyScope) {
 		return "Close tab", []keyScope{closeTabKeys}
 	case *contextPicker:
 		return "Query context", []keyScope{pickerKeys}
+	case *scriptMenu:
+		return "Scripts", []keyScope{scriptMenuKeys}
+	}
+	if m.focus == focusExplorer && m.explorer.filtering {
+		return "Explorer filter", []keyScope{explorerFilterKeys}
 	}
 	switch m.focus {
 	case focusQuery:

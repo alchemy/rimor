@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // postgres hierarchy:
@@ -92,8 +93,19 @@ func postgresFolder(ctx context.Context, conn *sql.DB, p *Object) ([]Object, err
 	case KindSequence:
 		return relations(KindSequence, "S")
 	case KindFunction:
-		return queryObjects(ctx, conn, inSchema(KindFunction), `
-			SELECT p.proname, '(' || pg_get_function_identity_arguments(p.oid) || ')'
+		// Procedures (CALL) are listed with the functions (SELECT), as
+		// PostgreSQL keeps both in pg_proc; the kind tells them apart.
+		return queryObjects(ctx, conn, func(name, detail string) Object {
+			kind := KindFunction
+			if rest, ok := strings.CutPrefix(detail, "p"); ok {
+				kind, detail = KindProcedure, rest
+			} else {
+				detail = detail[1:]
+			}
+			return Object{Kind: kind, Name: name, Detail: detail, Schema: p.Schema}
+		}, `
+			SELECT p.proname, CASE WHEN p.prokind = 'p' THEN 'p' ELSE 'f' END
+			                  || '(' || pg_get_function_identity_arguments(p.oid) || ')'
 			FROM pg_proc p
 			JOIN pg_namespace n ON n.oid = p.pronamespace
 			WHERE n.nspname = $1

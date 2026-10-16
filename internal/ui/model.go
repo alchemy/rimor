@@ -82,6 +82,7 @@ func New(store db.Store, sessionPath string, settings config.Settings) Model {
 	m.updateRunHint()
 	limit := int64(settings.ResultMemoryMB) << 20
 	m.query.memoryLimit, m.results.memoryLimit = limit, limit
+	m.explorer.scriptRows = settings.ScriptRows
 	m.query.spinner = spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle()))
 	if sessionPath != "" {
 		s, err := loadSession(sessionPath)
@@ -229,6 +230,11 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case AgentRequestMsg:
 		return m.agentRequest(msg)
+	case scriptsReadyMsg:
+		return m.scriptsReady(msg)
+	case openScriptMsg:
+		m.openScript(msg)
+		return nil
 
 	case runDoneMsg, rowsMsg:
 		cmd := m.query.Update(msg)
@@ -302,8 +308,11 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			m.modal, cmd = m.modal.Update(msg)
 			return cmd
 		}
-		if m.focus == focusQuery {
+		switch {
+		case m.focus == focusQuery:
 			return m.query.Update(msg)
+		case m.focus == focusExplorer && m.explorer.filtering:
+			return m.explorer.Update(msg)
 		}
 		return nil
 	}
@@ -368,6 +377,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	if m.focus == focusQuery {
 		return m.query.Update(msg)
+	}
+	// The explorer's filter takes typing, as the editor does.
+	if m.focus == focusExplorer && m.explorer.filtering {
+		return m.explorer.Update(msg)
 	}
 
 	// Panes without text input keep single-key shortcuts.

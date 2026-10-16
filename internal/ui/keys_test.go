@@ -23,6 +23,7 @@ var handlerScopes = []struct {
 	scope    keyScope
 }{
 	{"explorer.go", "*Explorer.handleKey", explorerKeys},
+	{"filter.go", "*Explorer.handleFilterKey", explorerFilterKeys},
 	{"results.go", "*ResultsPane.Update", resultsKeys},
 	{"query.go", "*QueryPane.Update", tabKeys},
 	{"cell.go", "*cellPopup.Update", cellKeys},
@@ -31,6 +32,7 @@ var handlerScopes = []struct {
 	{"dialogs.go", "*pathPrompt.Update", pathKeys},
 	{"dialogs.go", "confirmCloseTab.Update", closeTabKeys},
 	{"dialogs.go", "*contextPicker.Update", pickerKeys},
+	{"scripts.go", "*scriptMenu.Update", scriptMenuKeys},
 	{"help.go", "*helpOverlay.Update", helpKeys},
 	{"model.go", "*Model.handleKey", paneKeys},
 	{"../editor/editor.go", "*Model.handleKey", editorKeys},

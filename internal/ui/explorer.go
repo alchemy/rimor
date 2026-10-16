@@ -118,9 +118,12 @@ type line struct {
 	add   bool
 	text  string
 	depth int
+	// While filtering: a row that matches, or one on the path to a match;
+	// opened when rows below it are shown.
+	match, context, opened bool
 }
 
-func (l line) selectable() bool { return l.add || l.node != nil }
+func (l line) selectable() bool { return (l.add || l.node != nil) && !l.context }
 
 // Explorer is the connection and catalog tree.
 type Explorer struct {
@@ -134,6 +137,14 @@ type Explorer struct {
 	spinner spinner.Model
 	pending int    // loads in flight; the spinner ticks while > 0
 	notice  string // last persistence error
+
+	// The filter (see filter.go): open while filtering, with the cursor
+	// to go back to when it is cancelled.
+	filtering    bool
+	filter       string
+	beforeFilter *node
+
+	scriptRows int // the N of "first N rows" scripts
 }
 
 func NewExplorer(store db.Store) Explorer {
@@ -175,9 +186,16 @@ func (e *Explorer) Update(msg tea.Msg) tea.Cmd {
 			return cmd
 		}
 	case tea.KeyPressMsg:
+		if e.filtering {
+			return e.handleFilterKey(msg)
+		}
 		cmd := e.handleKey(msg)
 		e.scroll()
 		return cmd
+	case tea.PasteMsg:
+		if e.filtering {
+			e.setFilter(e.filter + strings.Join(strings.Fields(msg.Content), " "))
+		}
 	}
 	return nil
 }
@@ -243,6 +261,12 @@ func (e *Explorer) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			conn := e.cursor.conn
 			return func() tea.Msg { return disconnectMsg{conn} }
 		}
+	case "/":
+		e.startFilter()
+	case "s":
+		return e.scripts(false)
+	case "S":
+		return e.scripts(true)
 	case ".":
 		// Show or hide the empty schemas of the database under the cursor.
 		if d := e.cursor.database(); d != nil {
@@ -322,12 +346,18 @@ func (e *Explorer) ConnectionByName(name string) *connection {
 // Hints describes the keys that apply to the selected row.
 func (e *Explorer) Hints() string {
 	switch {
+	case e.filtering:
+		return hints("⏎", "go to", "esc", "close")
 	case e.cursor == nil:
-		return hints("⏎", "new connection")
+		return hints("⏎", "new connection", "/", "filter")
 	case e.cursor.root:
 		return hints("⏎", "open", "e", "edit", "d", "del")
 	case e.cursor.obj.Kind == db.KindDatabase:
 		return hints("⏎", "expand", ".", "schemas")
+	case e.scriptable() && e.cursor.expandable():
+		return hints("⏎", "expand", "s", "script")
+	case e.scriptable():
+		return hints("s", "script", "^t", "query")
 	default:
 		return hints("⏎", "expand", "^t", "query")
 	}
@@ -516,6 +546,10 @@ func (e *Explorer) rootOf(conn *connection) *node {
 
 // lines flattens the visible tree.
 func (e *Explorer) lines() []line {
+	if e.filtering && e.filter != "" {
+		ls, _ := e.filterLines()
+		return ls
+	}
 	ls := []line{{add: true}, {}}
 	if len(e.roots) == 0 {
 		ls = append(ls, line{text: mutedStyle.Render("No saved connections yet.")})
@@ -587,7 +621,11 @@ func (e *Explorer) indexOf(ls []line, n *node) int {
 
 // cursorIndex finds the selected line, moving the cursor up to the nearest
 // visible ancestor when its node was collapsed away or removed.
+// While filtering, the cursor may be on no row: -1.
 func (e *Explorer) cursorIndex(ls []line) int {
+	if e.filtering && e.filter != "" {
+		return e.indexOf(ls, e.cursor)
+	}
 	for {
 		if i := e.indexOf(ls, e.cursor); i >= 0 {
 			return i
@@ -609,6 +647,12 @@ func (e *Explorer) move(delta int) {
 			sel = append(sel, i)
 		}
 	}
+	if len(sel) == 0 {
+		return // a filter without matches
+	}
+	if cur < 0 {
+		pos, delta = 0, max(delta, 0)
+	}
 	pos = min(max(pos+delta, 0), len(sel)-1)
 	l := ls[sel[pos]]
 	if l.add {
@@ -620,29 +664,49 @@ func (e *Explorer) move(delta int) {
 
 // scroll keeps the cursor inside the viewport.
 func (e *Explorer) scroll() {
-	if e.height <= 0 {
+	height := e.listHeight()
+	if height <= 0 {
 		return
 	}
 	ls := e.lines()
 	cur := e.cursorIndex(ls)
+	if cur < 0 {
+		e.offset = min(e.offset, max(len(ls)-height, 0))
+		return
+	}
 	if cur < e.offset {
 		e.offset = cur
 	}
-	if cur >= e.offset+e.height {
-		e.offset = cur - e.height + 1
+	if cur >= e.offset+height {
+		e.offset = cur - height + 1
 	}
-	e.offset = min(e.offset, max(len(ls)-e.height, 0))
+	e.offset = min(e.offset, max(len(ls)-height, 0))
 	if cur <= 1 {
 		e.offset = 0 // keep the "New connection" row in view at the top
 	}
 }
 
+// listHeight is the rows the tree gets: all but the filter's line.
+func (e *Explorer) listHeight() int {
+	if e.filtering {
+		return e.height - 1
+	}
+	return e.height
+}
+
 func (e *Explorer) View(focused bool) string {
 	ls := e.lines()
 	cur := e.cursorIndex(ls)
-	end := min(e.offset+e.height, len(ls))
+	end := min(e.offset+e.listHeight(), len(ls))
 
-	rows := make([]string, 0, end-e.offset)
+	rows := make([]string, 0, end-e.offset+1)
+	if e.filtering {
+		_, matches := e.filterLines()
+		if e.filter == "" {
+			matches = -1
+		}
+		rows = append(rows, ansi.Truncate(e.filterBar(matches), e.width, "…"))
+	}
 	for i := e.offset; i < end; i++ {
 		rows = append(rows, e.renderLine(ls[i], i == cur, focused))
 	}
@@ -676,6 +740,8 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 
 		chevron := st(plain).Render(" ")
 		switch {
+		case l.context || l.opened:
+			chevron = st(mutedStyle).Render("▾") // opened for the filter
 		case n.loading:
 			chevron = st(accentStyle).Render(e.spinner.View())
 		case n.err != nil:
@@ -719,9 +785,15 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 		if current && !focused {
 			nameStyle = nameStyle.Foreground(colorAccent)
 		}
+		label := st(nameStyle).Render(name)
+		switch {
+		case l.context:
+			label = st(mutedStyle).Render(name)
+		case l.match:
+			label = e.highlight(name, nameStyle, st)
+		}
 
-		s = indent + chevron + gap + st(iconStyle(ic)).Render(ic.String()) + gap +
-			st(nameStyle).Render(name)
+		s = indent + chevron + gap + st(iconStyle(ic)).Render(ic.String()) + gap + label
 		if detail != "" {
 			s += st(plain).Render("  ") + st(mutedStyle).Render(detail)
 		}

@@ -89,8 +89,8 @@ func (lite sqlite) describe(ctx context.Context, conn *sql.DB, _, name string) (
 	}
 
 	rows, err := conn.QueryContext(ctx, `
-		SELECT name, type, "notnull" = 0, coalesce(dflt_value, ''), pk > 0
-		FROM pragma_table_info(?) ORDER BY cid`, t.Name)
+		SELECT name, type, "notnull" = 0, coalesce(dflt_value, ''), pk > 0, hidden IN (2, 3)
+		FROM pragma_table_xinfo(?) WHERE hidden <> 1 ORDER BY cid`, t.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (lite sqlite) describe(ctx context.Context, conn *sql.DB, _, name string) (
 	var objs []Object
 	for rows.Next() {
 		var c TableColumn
-		if err := rows.Scan(&c.Name, &c.Type, &c.Nullable, &c.Default, &c.PrimaryKey); err != nil {
+		if err := rows.Scan(&c.Name, &c.Type, &c.Nullable, &c.Default, &c.PrimaryKey, &c.Auto); err != nil {
 			return nil, err
 		}
 		t.Columns = append(t.Columns, c)
@@ -119,7 +119,8 @@ func (lite sqlite) describe(ctx context.Context, conn *sql.DB, _, name string) (
 	}
 	for i, o := range objs {
 		if o.Detail == "rowid" {
-			t.Columns[i].Nullable = false // the rowid under another name
+			t.Columns[i].Nullable = false // the rowid under another name,
+			t.Columns[i].Auto = true      // assigned when left out
 		}
 	}
 
