@@ -100,6 +100,27 @@ Windows on amd64 and arm64.
 
 `rimor -version` prints the version.
 
+### Updates
+
+Once a day, rimor asks GitHub whether a newer release is out. When one is,
+the explorer's top border shows it (`↑ v0.7.0`, linked to the release
+notes), and the first start after it came out says how to update: the
+release page, or the `go install` command for a binary built that way.
+`rimor -version` mentions it too.
+
+The check is one HTTPS request to `api.github.com`, without credentials.
+GitHub sees your address and, in the User-Agent, rimor's version; nothing
+else is sent. It runs in the background, gives up after 3 seconds, and
+fails silently: offline, behind a firewall, or past GitHub's limit for
+anonymous requests (60 an hour per address, shared in an office), rimor
+just tries again on a later start. The answer is kept in `update.json`
+beside the session.
+
+Installs from a system package manager (the AUR packages, under `/usr`)
+never check, since the package manager updates them. Development builds
+never check either. To turn it off, set `check_updates = false` in
+`config.toml`.
+
 The Nerd Font icons appear automatically when your terminal bundles them
 (kitty, Ghostty, WezTerm) or a Nerd Font is installed; otherwise rimor uses
 plain Unicode symbols. See `icons` in [Configuration](#configuration).
@@ -345,6 +366,7 @@ icons = "plain"         # "auto", "nerd" or "plain"
 leader = "ctrl+b"
 result_memory_mb = 2048 # memory a query's rows may take
 script_rows = 50        # rows the explorer's select scripts take
+check_updates = false   # never ask GitHub for new releases
 agent = false           # no AI agent access (see AI agents)
 
 [keys]

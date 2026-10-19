@@ -209,7 +209,7 @@ pre.block {
   font-size: .875rem; line-height: 1.6;
   overflow-x: auto;
 }
-.prompt { color: var(--muted); }
+.prompt, .comment { color: var(--muted); }
 .after { margin-top: 2rem; max-width: 40rem; color: var(--sub); }
 
 footer.wrap {
@@ -436,23 +436,28 @@ footer.wrap {
     <h2 id="install">Install</h2>
     <div class="columns">
       <div>
-        <h3>With Go</h3>
+        <h3>Download</h3>
         <p>A single binary with no other dependencies, for Linux, macOS and
-          Windows. Needs Go 1.27 or newer.</p>
-<pre class="block"><span class="prompt">$ </span>go install rimor.dev/cmd/rimor@latest
-<span class="prompt">$ </span>rimor</pre>
+          Windows on amd64 and arm64: get the archive for your system from
+          <a href="https://github.com/alchemy/rimor/releases/latest">the latest
+          release</a>. On Arch Linux it is in the AUR, built from source or
+          prebuilt.</p>
+<pre class="block"><span class="prompt">$ </span>yay -S rimor      <span class="comment"># or rimor-bin</span></pre>
       </div>
       <div>
-        <h3>From source</h3>
-        <p>Clone the repository and build the command; the binary lands in the
-          current folder.</p>
-<pre class="block"><span class="prompt">$ </span>git clone https://github.com/alchemy/rimor
+        <h3>With Go</h3>
+        <p>With Go 1.27 or newer, install it, or clone the repository and
+          build it; the binary lands in the current folder.</p>
+<pre class="block"><span class="prompt">$ </span>go install rimor.dev/cmd/rimor@latest
+<span class="prompt">$ </span>git clone https://github.com/alchemy/rimor
 <span class="prompt">$ </span>cd rimor &amp;&amp; go build ./cmd/rimor</pre>
       </div>
     </div>
     <p class="after">Press <kbd>a</kbd> in the explorer to add a connection.
       Settings live in <code>~/.config/rimor/config.toml</code>, written with
-      every default on first run.</p>
+      every default on first run. Once a day rimor asks GitHub whether a newer
+      release is out, and says so in the explorer;
+      <code>check_updates = false</code> turns that off.</p>
   </section>
 </main>
 

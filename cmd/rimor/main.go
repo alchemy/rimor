@@ -6,9 +6,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -16,6 +18,7 @@ import (
 	"rimor.dev/internal/config"
 	"rimor.dev/internal/db"
 	"rimor.dev/internal/ui"
+	"rimor.dev/internal/update"
 )
 
 // version is set by release builds (-ldflags "-X main.version=v1.2.3").
@@ -31,6 +34,70 @@ func Version() string {
 		return info.Main.Version
 	}
 	return "dev"
+}
+
+// goInstalled reports a binary built by go install, which records the
+// module version that release builds set themselves.
+func goInstalled() bool {
+	if version != "" {
+		return false
+	}
+	info, ok := debug.ReadBuildInfo()
+	return ok && info.Main.Version != "" && info.Main.Version != "(devel)"
+}
+
+// updatePath is where the last update check is kept, beside the session.
+func updatePath() string {
+	session, err := ui.DefaultSessionPath()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(session), "update.json")
+}
+
+// release describes a newer release for the UI.
+func release(s update.State, announce bool) ui.UpdateMsg {
+	msg := ui.UpdateMsg{Latest: s.Latest, URL: s.URL, Announce: announce}
+	if goInstalled() {
+		msg.Command = "go install rimor.dev/cmd/rimor@latest"
+	}
+	return msg
+}
+
+// checkUpdates shows what the last check found and, when a day has passed,
+// asks again in the background; failures are silent.
+func checkUpdates(m ui.Model, enabled bool) (ui.Model, func(p *tea.Program)) {
+	path := updatePath()
+	if !enabled || path == "" || update.Packaged() {
+		return m, nil
+	}
+	s := update.Load(path)
+	if update.Newer(Version(), s.Latest) {
+		announce := s.Notified != s.Latest
+		m = m.WithUpdate(release(s, announce))
+		if announce {
+			s.Notified = s.Latest
+			_ = s.Save(path)
+		}
+	}
+	if !s.Due(time.Now()) || Version() == "dev" {
+		return m, nil
+	}
+	return m, func(p *tea.Program) {
+		checked, err := update.Check(context.Background(), http.DefaultClient, Version(), s, time.Now())
+		if err != nil {
+			return
+		}
+		newer := update.Newer(Version(), checked.Latest)
+		announce := newer && checked.Notified != checked.Latest
+		if announce {
+			checked.Notified = checked.Latest
+		}
+		_ = checked.Save(path)
+		if newer {
+			p.Send(release(checked, announce))
+		}
+	}
 }
 
 func main() {
@@ -51,7 +118,13 @@ func main() {
 	}
 	flag.Parse()
 	if *showVersion {
-		fmt.Println("rimor", Version())
+		line := "rimor " + Version()
+		if path := updatePath(); path != "" {
+			if s := update.Load(path); update.Newer(Version(), s.Latest) {
+				line += " (" + s.Latest + " is out: " + s.URL + ")"
+			}
+		}
+		fmt.Println(line)
 		return
 	}
 	if err := run(); err != nil {
@@ -91,9 +164,13 @@ func run() error {
 			defer srv.Close()
 		}
 	}
+	m, check := checkUpdates(m, settings.CheckUpdates)
 	p := tea.NewProgram(m)
 	if srv != nil {
 		go srv.Serve(forward(p))
+	}
+	if check != nil {
+		go check(p)
 	}
 	final, err := p.Run()
 	if m, ok := final.(ui.Model); ok {

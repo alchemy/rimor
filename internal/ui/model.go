@@ -47,6 +47,7 @@ type Model struct {
 	keys         keymap
 	help         *helpOverlay // the key help, over everything; nil when closed
 	waiters      []*runWaiter // agents waiting for a tab's run to end
+	newRelease   *UpdateMsg   // a newer release, when one is out
 	leader       bool         // the leader key was pressed; the next key picks an action
 	leaderRepeat bool         // a resize step ran; further steps need no new leader
 
@@ -230,6 +231,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case AgentRequestMsg:
 		return m.agentRequest(msg)
+	case UpdateMsg:
+		return m.updateMsg(msg)
 	case scriptsReadyMsg:
 		return m.scriptsReady(msg)
 	case openScriptMsg:
@@ -484,6 +487,9 @@ func (m Model) renderPane(f focus, width, height int) string {
 
 	switch f {
 	case focusExplorer:
+		if p.corner == "" {
+			p.corner = m.updateCorner()
+		}
 		p.hotRight = hot == handleExplorer
 		if focused {
 			p.footer = m.explorer.Hints()
