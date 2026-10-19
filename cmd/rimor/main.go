@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -39,11 +40,19 @@ func Version() string {
 // goInstalled reports a binary built by go install, which records the
 // module version that release builds set themselves.
 func goInstalled() bool {
-	if version != "" {
+	if version != "" || localBuild() {
 		return false
 	}
 	info, ok := debug.ReadBuildInfo()
 	return ok && info.Main.Version != "" && info.Main.Version != "(devel)"
+}
+
+// localBuild reports a binary built from a checkout: "dev", or, since Go
+// 1.24 stamps go build with the repository's tags, a version marked
+// +dirty. It never checks for updates.
+func localBuild() bool {
+	v := Version()
+	return v == "dev" || strings.HasSuffix(v, "+dirty")
 }
 
 // updatePath is where the last update check is kept, beside the session.
@@ -80,7 +89,7 @@ func checkUpdates(m ui.Model, enabled bool) (ui.Model, func(p *tea.Program)) {
 			_ = s.Save(path)
 		}
 	}
-	if !s.Due(time.Now()) || Version() == "dev" {
+	if !s.Due(time.Now()) || localBuild() {
 		return m, nil
 	}
 	return m, func(p *tea.Program) {
