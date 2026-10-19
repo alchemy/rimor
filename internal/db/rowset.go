@@ -83,6 +83,9 @@ type RowSet struct {
 
 	updated chan struct{}
 	cancel  context.CancelFunc
+	// drain, when set, reads what follows the result set in its batch, after
+	// the last row; its error is the fetch's (SQL Server, see runMSSQL).
+	drain func() error
 }
 
 // Columns describes the result columns; they do not change.
@@ -240,6 +243,10 @@ func (s *RowSet) fetch(ctx context.Context, rows *sql.Rows, limit int64, release
 	s.publish(cur, numeric, seen)
 	if err := rows.Err(); err != nil {
 		s.fail(ctx, err)
+	} else if s.drain != nil {
+		if err := s.drain(); err != nil {
+			s.fail(ctx, err)
+		}
 	}
 }
 

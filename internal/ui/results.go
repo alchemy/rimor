@@ -112,6 +112,7 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 		MemoryLimit: q.memoryLimit, Cancel: cancel,
 		// SQL Server cannot make a session read-only; rimor checks instead.
 		CheckReadOnly: cfg.ReadOnly && cfg.Driver == db.SQLServer,
+		Driver:        cfg.Driver,
 	}
 	exec := func() tea.Msg {
 		for attempt := 0; ; attempt++ {

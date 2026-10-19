@@ -379,10 +379,12 @@ results) are not remappable yet.
 
 ## Limitations
 
-- Statements are classified before they run: one starting with `SELECT`,
-  `WITH`, `EXEC`, `SHOW` and the like, or containing `RETURNING`/`OUTPUT`,
-  shows rows; anything else shows the rows affected. A mutating statement
-  never runs twice to find out.
+- On PostgreSQL and SQLite, statements are classified before they run: one
+  starting with `SELECT`, `WITH`, `SHOW` and the like, or containing
+  `RETURNING`, shows rows; anything else shows the rows affected. A mutating
+  statement never runs twice to find out. SQL Server batches are not
+  classified: the server reports what they produce, so `DECLARE …; SELECT …`
+  shows its rows and a batch that only writes shows the rows affected.
 - On PostgreSQL a row-returning query must be a single statement; select it
   to run one of several. SQL Server batches work, and the first result set
   with columns is shown.

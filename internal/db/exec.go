@@ -83,6 +83,10 @@ type Result struct {
 	// Duration is the time until the statement returned: its first rows,
 	// for queries.
 	Duration time.Duration
+
+	// Messages are the batch's PRINT and info messages before its first
+	// result set (SQL Server).
+	Messages []string
 }
 
 // HasRows reports whether the statement produced a result set.
@@ -99,6 +103,9 @@ type RunOptions struct {
 	// CheckReadOnly refuses statements that may write (see CheckReadOnly),
 	// for read-only connections whose database cannot enforce it.
 	CheckReadOnly bool
+	// Driver picks how the batch runs: SQL Server batches report what they
+	// produce (see runMSSQL); the others are classified by their first word.
+	Driver Driver
 }
 
 // rowKeywords start statements that return rows.
@@ -166,6 +173,16 @@ func Run(ctx context.Context, conn *sql.Conn, query string, opts RunOptions) (*R
 	}
 
 	start := time.Now()
+	if opts.Driver == SQLServer {
+		res, err := runMSSQL(ctx, conn, query, opts)
+		if res != nil {
+			res.Duration = time.Since(start)
+		}
+		if res == nil || res.Rows == nil {
+			opts.Cancel()
+		}
+		return res, err
+	}
 	res := &Result{}
 	var err error
 	if returnsRows(query) {
@@ -199,16 +216,7 @@ func startQuery(ctx context.Context, conn *sql.Conn, query string, opts RunOptio
 			return nil, err
 		}
 		if len(types) > 0 {
-			set := &RowSet{
-				columns: make([]Column, len(types)),
-				numeric: make([]bool, len(types)),
-				seen:    make([]bool, len(types)),
-				updated: make(chan struct{}, 1),
-				cancel:  opts.Cancel,
-			}
-			for i, t := range types {
-				set.columns[i] = Column{Name: t.Name(), Type: t.DatabaseTypeName()}
-			}
+			set := newRowSet(types, opts)
 			go set.fetch(ctx, rows, opts.MemoryLimit, opts.Cancel)
 			return set, nil
 		}
@@ -218,6 +226,21 @@ func startQuery(ctx context.Context, conn *sql.Conn, query string, opts RunOptio
 			return nil, err
 		}
 	}
+}
+
+// newRowSet makes the row set of a result with these columns.
+func newRowSet(types []*sql.ColumnType, opts RunOptions) *RowSet {
+	set := &RowSet{
+		columns: make([]Column, len(types)),
+		numeric: make([]bool, len(types)),
+		seen:    make([]bool, len(types)),
+		updated: make(chan struct{}, 1),
+		cancel:  opts.Cancel,
+	}
+	for i, t := range types {
+		set.columns[i] = Column{Name: t.Name(), Type: t.DatabaseTypeName()}
+	}
+	return set
 }
 
 func numericType(name string) bool {
