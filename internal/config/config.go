@@ -40,7 +40,7 @@ type Settings struct {
 	ResultMemoryMB int `toml:"result_memory_mb"`
 	// ScriptRows is the N of the explorer's "first N rows" scripts.
 	ScriptRows int `toml:"script_rows"`
-	// CheckUpdates asks GitHub once a day whether a newer rimor is out.
+	// CheckUpdates asks GitHub every 4 hours whether a newer rimor is out.
 	CheckUpdates bool `toml:"check_updates"`
 	// Agent lets AI agents connected through "rimor mcp" read the catalog
 	// and open query tabs; they never run anything.
@@ -223,8 +223,8 @@ func Template() string {
 	b.WriteString(`# Rows the explorer's scripts select (s on a table, view or column).
 `)
 	fmt.Fprintf(&b, "# script_rows = %d\n\n", d.ScriptRows)
-	b.WriteString(`# Once a day, ask GitHub whether a newer rimor is out, and say so in the
-# explorer. It is one request to api.github.com, without credentials: GitHub
+	b.WriteString(`# Every 4 hours, ask GitHub whether a newer rimor is out, and say so above
+# the query. It is one request to api.github.com, without credentials: GitHub
 # sees your address and rimor's version. Installs from a system package
 # manager (the AUR) never ask; it updates them.
 `)

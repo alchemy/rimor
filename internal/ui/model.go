@@ -504,13 +504,13 @@ func (m Model) renderPane(f focus, width, height int) string {
 		} else {
 			p.corner = mutedStyle.Render("full screen")
 		}
+	case f == focusQuery:
+		// A newer release, on the widest top border there is.
+		p.corner = m.updateCorner()
 	}
 
 	switch f {
 	case focusExplorer:
-		if p.corner == "" {
-			p.corner = m.updateCorner()
-		}
 		p.hotRight = hot == handleExplorer
 		if focused {
 			p.footer = m.explorer.Hints()

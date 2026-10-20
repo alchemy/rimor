@@ -2,9 +2,9 @@ package ui
 
 import tea "charm.land/bubbletea/v2"
 
-// A newer release (see package update) shows as a marker in the
-// explorer's top border for as long as it is newer, and once per release
-// as a note under the query pane.
+// A newer release (see package update) shows as a marker in the query
+// pane's top border for as long as it is newer, and once per release as a
+// note under it.
 
 // UpdateMsg says a newer release is out.
 type UpdateMsg struct {
@@ -37,7 +37,7 @@ func (m *Model) showUpdate(msg UpdateMsg) {
 	m.query.notice = accentStyle.Render("↑ rimor "+msg.Latest+" is out") + mutedStyle.Render(" · ") + how
 }
 
-// updateCorner is the explorer's marker, linked to the release.
+// updateCorner is the marker, linked to the release.
 func (m *Model) updateCorner() string {
 	if m.newRelease == nil {
 		return ""

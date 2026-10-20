@@ -1,10 +1,14 @@
 // Package update finds out whether a newer rimor has been released.
 //
-// At most once a day it asks GitHub for the latest release, without
+// At most every Interval it asks GitHub for the latest release, without
 // credentials: one HTTPS request to api.github.com, which sees the
 // address it comes from and a User-Agent naming rimor's version. The answer
 // is kept in the state folder, so starts in between, or offline, still
-// know it. Failures are silent: the next start tries again.
+// know it, and so do other rimor windows. Failures are silent.
+//
+// GitHub allows 60 requests an hour per address without credentials, and
+// counts conditional ones (If-None-Match) too, so the interval is what
+// keeps an office sharing one address within the limit.
 package update
 
 import (
@@ -25,8 +29,12 @@ import (
 // prereleases and drafts.
 var Endpoint = "https://api.github.com/repos/alchemy/rimor/releases/latest"
 
-// Interval is how long an answer is trusted before asking again.
-const Interval = 24 * time.Hour
+// Interval is how long an answer is trusted before asking again: at
+// startup, and while rimor runs.
+const Interval = 4 * time.Hour
+
+// RetryAfter is the wait after a check failed (offline, refused).
+const RetryAfter = time.Hour
 
 // Timeout bounds the request: a slow network must not hold anything up.
 const Timeout = 3 * time.Second
@@ -42,8 +50,14 @@ type State struct {
 }
 
 // Due reports whether it is time to ask again.
-func (s State) Due(now time.Time) bool {
-	return s.Checked.IsZero() || now.Sub(s.Checked) >= Interval || now.Before(s.Checked)
+func (s State) Due(now time.Time) bool { return s.Wait(now) == 0 }
+
+// Wait is how long until it is time to ask again; 0 when it is.
+func (s State) Wait(now time.Time) time.Duration {
+	if s.Checked.IsZero() || now.Before(s.Checked) {
+		return 0
+	}
+	return max(Interval-now.Sub(s.Checked), 0)
 }
 
 // Load reads the state; a missing or unreadable file is an empty one.

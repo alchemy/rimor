@@ -44,6 +44,8 @@ func TestDue(t *testing.T) {
 	}{
 		{time.Time{}, true},
 		{now.Add(-time.Hour), false},
+		{now.Add(-Interval + time.Minute), false},
+		{now.Add(-Interval), true},
 		{now.Add(-25 * time.Hour), true},
 		{now.Add(time.Hour), true}, // the clock went back: ask
 	} {

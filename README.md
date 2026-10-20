@@ -106,19 +106,19 @@ Windows on amd64 and arm64.
 
 ### Updates
 
-Once a day, rimor asks GitHub whether a newer release is out. When one is,
-the explorer's top border shows it (`↑ v0.7.0`, linked to the release
-notes), and the first start after it came out says how to update: the
-release page, or the `go install` command for a binary built that way.
-`rimor -version` mentions it too.
+Every 4 hours, at startup and while it runs, rimor asks GitHub whether a
+newer release is out. When one is, the query pane's top border shows it
+(`↑ v0.7.0`, linked to the release notes), and once per release a note
+says how to update: the release page, or the `go install` command for a
+binary built that way. `rimor -version` mentions it too.
 
 The check is one HTTPS request to `api.github.com`, without credentials.
 GitHub sees your address and, in the User-Agent, rimor's version; nothing
 else is sent. It runs in the background, gives up after 3 seconds, and
 fails silently: offline, behind a firewall, or past GitHub's limit for
 anonymous requests (60 an hour per address, shared in an office), rimor
-just tries again on a later start. The answer is kept in `update.json`
-beside the session.
+just tries again an hour later. The answer is kept in `update.json`
+beside the session, which other rimor windows share.
 
 Installs from a system package manager (the AUR packages, under `/usr`)
 never check, since the package manager updates them. Development builds

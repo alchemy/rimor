@@ -73,8 +73,9 @@ func release(s update.State, announce bool) ui.UpdateMsg {
 	return msg
 }
 
-// checkUpdates shows what the last check found and, when a day has passed,
-// asks again in the background; failures are silent.
+// checkUpdates shows what the last check found, and asks again in the
+// background whenever update.Interval has passed, at startup and while
+// rimor runs; failures are silent.
 func checkUpdates(m ui.Model, enabled bool) (ui.Model, func(p *tea.Program)) {
 	path := updatePath()
 	if !enabled || path == "" || update.Packaged() {
@@ -89,22 +90,31 @@ func checkUpdates(m ui.Model, enabled bool) (ui.Model, func(p *tea.Program)) {
 			_ = s.Save(path)
 		}
 	}
-	if !s.Due(time.Now()) || localBuild() {
+	if localBuild() {
 		return m, nil
 	}
 	return m, func(p *tea.Program) {
-		checked, err := update.Check(context.Background(), http.DefaultClient, Version(), s, time.Now())
-		if err != nil {
-			return
-		}
-		newer := update.Newer(Version(), checked.Latest)
-		announce := newer && checked.Notified != checked.Latest
-		if announce {
-			checked.Notified = checked.Latest
-		}
-		_ = checked.Save(path)
-		if newer {
-			p.Send(release(checked, announce))
+		for {
+			// Reloaded each time: another rimor window may have asked.
+			s := update.Load(path)
+			if wait := s.Wait(time.Now()); wait > 0 {
+				time.Sleep(wait)
+				continue
+			}
+			checked, err := update.Check(context.Background(), http.DefaultClient, Version(), s, time.Now())
+			if err != nil {
+				time.Sleep(update.RetryAfter)
+				continue
+			}
+			newer := update.Newer(Version(), checked.Latest)
+			announce := newer && checked.Notified != checked.Latest
+			if announce {
+				checked.Notified = checked.Latest
+			}
+			_ = checked.Save(path)
+			if newer {
+				p.Send(release(checked, announce))
+			}
 		}
 	}
 }
