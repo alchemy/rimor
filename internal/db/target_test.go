@@ -46,8 +46,15 @@ func TestParseTarget(t *testing.T) {
 	wd, _ := os.Getwd()
 	t.Cleanup(func() { os.Chdir(wd) })
 	os.Chdir(dir)
-	if cfg, err := ParseTarget("app.db"); err != nil || cfg.DSN != file {
-		t.Errorf("relative path: %+v, %v", cfg, err)
+	cfg, err := ParseTarget("app.db")
+	if err != nil || !filepath.IsAbs(cfg.DSN) {
+		t.Fatalf("relative path: %+v, %v", cfg, err)
+	}
+	// The same file, whatever the path says (on macOS /var is /private/var).
+	a, _ := os.Stat(cfg.DSN)
+	b, _ := os.Stat(file)
+	if a == nil || b == nil || !os.SameFile(a, b) {
+		t.Errorf("relative path: %q is not %q", cfg.DSN, file)
 	}
 
 	for _, arg := range []string{"", "mysql://me@host/db", filepath.Join(dir, "typo.db"), dir} {
