@@ -83,9 +83,7 @@ type RowSet struct {
 
 	updated chan struct{}
 	cancel  context.CancelFunc
-	// drain, when set, reads what follows the result set in its batch, after
-	// the last row; its error is the fetch's (SQL Server, see runMSSQL).
-	drain func() error
+	batch   *Batch // the batch the set belongs to, told of its progress too
 }
 
 // Columns describes the result columns; they do not change.
@@ -164,6 +162,9 @@ func (s *RowSet) notify() {
 	case s.updated <- struct{}{}:
 	default: // a signal is already pending
 	}
+	if s.batch != nil {
+		s.batch.notify()
+	}
 }
 
 // publish makes a chunk visible, with the column statistics so far.
@@ -188,14 +189,20 @@ func (s *RowSet) fetch(ctx context.Context, rows *sql.Rows, limit int64, release
 	start := time.Now()
 	defer func() {
 		rows.Close()
-		s.mu.Lock()
-		s.done = true
-		s.fetched = time.Since(start)
-		s.mu.Unlock()
+		s.finish(start)
 		release()
-		s.notify()
 	}()
+	if !s.fill(ctx, rows, limit) {
+		if err := rows.Err(); err != nil {
+			s.fail(ctx, err)
+		}
+	}
+}
 
+// fill reads rows into the set until they end, the context ends or a row
+// fails, publishing them in chunks. It reports whether it stopped at the
+// memory limit, with rows left unread.
+func (s *RowSet) fill(ctx context.Context, rows *sql.Rows, limit int64) (limited bool) {
 	cols := len(s.columns)
 	raw := make([]any, cols)
 	ptrs := make([]any, cols)
@@ -236,18 +243,21 @@ func (s *RowSet) fetch(ctx context.Context, rows *sql.Rows, limit int64, release
 				s.mu.Lock()
 				s.stopped = StopLimit
 				s.mu.Unlock()
-				return
+				return true
 			}
 		}
 	}
 	s.publish(cur, numeric, seen)
-	if err := rows.Err(); err != nil {
-		s.fail(ctx, err)
-	} else if s.drain != nil {
-		if err := s.drain(); err != nil {
-			s.fail(ctx, err)
-		}
-	}
+	return false
+}
+
+// finish marks the fetch over.
+func (s *RowSet) finish(start time.Time) {
+	s.mu.Lock()
+	s.done = true
+	s.fetched = time.Since(start)
+	s.mu.Unlock()
+	s.notify()
 }
 
 // fail records a fetch error, unless it is the cancellation of a stop.

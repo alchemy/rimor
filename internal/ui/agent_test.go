@@ -386,7 +386,7 @@ func TestAgentWaitsForTheUsersRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireIn(t, got, `"status":"done"`, `"rows":2`, `"results":"not shared`)
+	requireIn(t, got, `"status":"done"`, `"rows":2`, `"rows_access":"not shared`)
 	if strings.Contains(got, "Secret") {
 		t.Errorf("rows without a grant: %s", got)
 	}

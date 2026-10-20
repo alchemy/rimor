@@ -60,6 +60,9 @@ type cellSavedMsg struct {
 type cellPopup struct {
 	tab      *tab
 	run      *run
+	set      *db.RowSet // the result the cell is in
+	view     *setView   // its view, which caches where it comes from
+	first    bool       // the first result of its batch
 	row, col int
 	column   db.Column
 
@@ -131,8 +134,9 @@ func jsonError(s string) (msg string, line, col int, ok bool) {
 }
 
 func newCellPopup(t *tab, row, col, maxWidth int) *cellPopup {
-	set := t.run.res.Rows
-	p := &cellPopup{tab: t, run: t.run, row: row, col: col, column: set.Columns()[col]}
+	set := t.run.set()
+	p := &cellPopup{tab: t, run: t.run, set: set, view: t.run.view(), first: t.run.cur == 0,
+		row: row, col: col, column: set.Columns()[col]}
 	p.json, p.normalized = jsonColumn(t.ctx.conn.cfg().Driver, p.column.Type)
 	p.ed = editor.New(editorTheme)
 	p.ed.NoLineNumbers = true
@@ -197,16 +201,19 @@ func (m *Model) prepareCell(p *cellPopup) tea.Cmd {
 		p.reason = "Rows are still arriving; esc in the results stops fetching, then the cell can be edited."
 	case t.session == nil || t.sessionCtx != t.ctx || t.run != r:
 		p.reason = "Run the query again to edit its results."
-	case r.originErr != nil:
-		p.reason = r.originErr.Error()
+	case !p.first:
+		// Finding the table describes the batch's first result only.
+		p.reason = "Only the first result of a batch can be edited."
+	case p.view.originErr != nil:
+		p.reason = p.view.originErr.Error()
 	}
 	if p.reason != "" {
 		return nil
 	}
 
 	p.phase = cellLoading
-	session, origin, query := t.session, r.origin, r.query
-	set, row, col := r.res.Rows, p.row, p.col
+	session, origin, query := t.session, p.view.origin, r.query
+	set, row, col := p.set, p.row, p.col
 	driver := cfg.Driver
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), cellTimeout)
@@ -337,10 +344,13 @@ func (p *cellPopup) save() tea.Cmd {
 func (p *cellPopup) Update(msg tea.Msg) (modal, tea.Cmd) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
-		if paste, ok := msg.(tea.PasteMsg); ok && p.phase == cellEditing {
-			cmd := p.ed.Update(paste)
-			p.afterEdit()
-			return p, cmd
+		switch msg.(type) {
+		case tea.PasteMsg, tea.ClipboardMsg, editor.PasteTimeoutMsg:
+			if p.phase == cellEditing {
+				cmd := p.ed.Update(msg)
+				p.afterEdit()
+				return p, cmd
+			}
 		}
 		return p, nil
 	}

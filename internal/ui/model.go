@@ -10,6 +10,7 @@ import (
 
 	"rimor.dev/internal/config"
 	"rimor.dev/internal/db"
+	"rimor.dev/internal/editor"
 )
 
 type focus int
@@ -47,6 +48,7 @@ type Model struct {
 	keys         keymap
 	help         *helpOverlay // the key help, over everything; nil when closed
 	waiters      []*runWaiter // agents waiting for a tab's run to end
+	startup      []tea.Cmd    // run by Init: loading a temporary connection
 	newRelease   *UpdateMsg   // a newer release, when one is out
 	leader       bool         // the leader key was pressed; the next key picks an action
 	leaderRepeat bool         // a resize step ran; further steps need no new leader
@@ -117,7 +119,9 @@ func (m Model) saveSession() {
 
 // Init asks the terminal for its background colour, which "auto" uses to
 // choose dark or light and the terminal theme to shade the selection.
-func (m Model) Init() tea.Cmd { return tea.RequestBackgroundColor }
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(append([]tea.Cmd{tea.RequestBackgroundColor}, m.startup...)...)
+}
 
 // setFocus moves the focus. In full screen the newly focused pane takes
 // over the screen.
@@ -231,6 +235,11 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case AgentRequestMsg:
 		return m.agentRequest(msg)
+	case loadedMsg:
+		cmd := m.explorer.Update(msg)
+		return tea.Batch(cmd, m.askPasswordIfRefused(msg))
+	case passwordChosenMsg:
+		return m.usePassword(msg)
 	case UpdateMsg:
 		return m.updateMsg(msg)
 	case scriptsReadyMsg:
@@ -249,7 +258,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	// The cell popup.
 	case openCellMsg:
-		if msg.tab.run == nil || msg.tab.run.res == nil || !msg.tab.run.res.HasRows() {
+		if msg.tab.run == nil || msg.tab.run.set() == nil {
 			return nil
 		}
 		p := newCellPopup(msg.tab, msg.row, msg.col, m.dialogWidth())
@@ -257,8 +266,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.modal = p
 		return m.prepareCell(p)
 	case cellReadyMsg:
-		if r := msg.popup.run; r.origin == nil && r.originErr == nil {
-			r.origin, r.originErr = msg.origin, msg.originErr // once per result
+		if v := msg.popup.view; v.origin == nil && v.originErr == nil {
+			v.origin, v.originErr = msg.origin, msg.originErr // once per result
 		}
 		if m.modal == msg.popup {
 			msg.popup.ready(msg)
@@ -275,7 +284,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		}
-		p.run.res.Rows.SetCell(p.row, p.col, msg.value)
+		p.set.SetCell(p.row, p.col, msg.value)
 		m.results.notice = okStyle.Render("✓ saved " + p.column.Name)
 		if m.modal == p {
 			m.modal = nil
@@ -305,6 +314,18 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.ClipboardMsg, editor.PasteTimeoutMsg:
+		// The terminal's clipboard, or the end of the wait for it: for the
+		// editor whose ctrl+v asked (the others ignore it).
+		if m.modal != nil {
+			var cmd tea.Cmd
+			m.modal, cmd = m.modal.Update(msg)
+			return cmd
+		}
+		if t := m.query.current(); t != nil {
+			return t.ed.Update(msg)
+		}
+		return nil
 	case tea.PasteMsg:
 		if m.modal != nil {
 			var cmd tea.Cmd

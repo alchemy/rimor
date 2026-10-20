@@ -22,7 +22,7 @@ Typical use: list_connections to find the connection the user means (by its name
 
 After you hand a tab over, wait_for_run waits until the user has run it and reports how it went: failed and why, or which columns and how many rows. The rows themselves are private unless the user lets you read them for that tab (they press a key in rimor; pass want_results to ask). Then wait_for_run includes the first rows and read_results pages through the rest.
 
-For work that takes many queries, such as diagnosing a slow server, keep one tab and revise it with update_query for each step: the user reads it, runs it, and wait_for_run gives you the result. Put one statement that returns rows in each run: rimor shows only the first result set of a batch. Ask before anything that writes; the user is warned about SQL that may write.`
+For work that takes many queries, such as diagnosing a slow server, keep one tab and revise it with update_query for each step: the user reads it, runs it, and wait_for_run gives you the result. On SQL Server a batch may return several results: the outcome lists them ("results"), and read_results takes the result's number. It also lists the batch's messages: row counts and errors, and PRINT or SET STATISTICS output when the user shares the tab. Ask before anything that writes; the user is warned about SQL that may write.`
 
 // object is a JSON schema for an object with these properties, of which
 // required ones must be given.
@@ -138,6 +138,7 @@ var Tools = []Tool{
 		Title: "Read a query tab",
 		Description: "A tab's SQL and context, the text the user has selected in it, and the outcome of its last run: " +
 			"running, failed (with the database's message and code, and where in the SQL), or done (columns, row count, rows affected). " +
+			"For a SQL Server batch, every result's columns and row count, and its messages. " +
 			"Result rows are never included: see read_results. Without tab, the tab the user is looking at.",
 		InputSchema: object(map[string]any{
 			"tab": map[string]any{"type": "integer", "description": "Tab id; omit for the current tab."},
@@ -164,6 +165,7 @@ var Tools = []Tool{
 			"cells over 1 KB are cut and end in …. next_offset, when present, is where the next page starts; it is also present while rows are still arriving.",
 		InputSchema: object(map[string]any{
 			"tab":    map[string]any{"type": "integer", "description": "Tab id; omit for the current tab."},
+			"result": map[string]any{"type": "integer", "minimum": 1, "description": "Which result of a batch, from 1; default 1."},
 			"offset": map[string]any{"type": "integer", "minimum": 0, "description": "First row, from 0."},
 			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "description": "Rows to return; default 100."},
 		}),

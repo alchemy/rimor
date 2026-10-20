@@ -328,7 +328,10 @@ func (f *connForm) View(int) string {
 	body := lipgloss.NewStyle().Padding(0, 2).Render(strings.Join(rows, "\n"))
 
 	title := "New connection"
-	if f.conn != nil {
+	switch {
+	case f.conn != nil && f.conn.temporary:
+		title = "Save connection" // keeps a connection given on the command line
+	case f.conn != nil:
 		title = "Edit connection"
 	}
 	p := pane{title: title, footer: hints("^t", "test", "^s", "save", "esc", "cancel")}

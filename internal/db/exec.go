@@ -84,13 +84,57 @@ type Result struct {
 	// for queries.
 	Duration time.Duration
 
-	// Messages are the batch's PRINT and info messages before its first
-	// result set (SQL Server).
-	Messages []string
+	// Batch, for SQL Server, holds every result set of the batch (Rows is
+	// the first) and its messages; nil elsewhere.
+	Batch *Batch
 }
 
 // HasRows reports whether the statement produced a result set.
 func (r *Result) HasRows() bool { return r.Rows != nil }
+
+// Sets are the result sets so far: the batch's, or the one there is.
+func (r *Result) Sets() []*RowSet {
+	switch {
+	case r.Batch != nil:
+		return r.Batch.Sets()
+	case r.Rows != nil:
+		return []*RowSet{r.Rows}
+	}
+	return nil
+}
+
+// Fetching reports whether rows or messages are still arriving.
+func (r *Result) Fetching() bool {
+	switch {
+	case r.Batch != nil:
+		return !r.Batch.Done()
+	case r.Rows != nil:
+		return !r.Rows.Progress().Done
+	}
+	return false
+}
+
+// Stop ends fetching, keeping what arrived.
+func (r *Result) Stop() {
+	switch {
+	case r.Batch != nil:
+		r.Batch.Stop()
+	case r.Rows != nil:
+		r.Rows.Stop()
+	}
+}
+
+// Updated is signalled while rows (or, for a batch, results and messages)
+// arrive and when they end; nil when nothing is fetched.
+func (r *Result) Updated() <-chan struct{} {
+	switch {
+	case r.Batch != nil:
+		return r.Batch.Updated()
+	case r.Rows != nil:
+		return r.Rows.Updated()
+	}
+	return nil
+}
 
 // RunOptions control a statement's execution.
 type RunOptions struct {

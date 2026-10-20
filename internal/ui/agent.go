@@ -44,6 +44,7 @@ type agentArgs struct {
 	Tab        *int   `json:"tab"`
 	// Results: who asks, and which rows.
 	WantResults bool `json:"want_results"`
+	Result      int  `json:"result"` // 1-based, for batches with several
 	Offset      int  `json:"offset"`
 	Limit       int  `json:"limit"`
 	Timeout     int  `json:"timeout_seconds"`
@@ -395,10 +396,12 @@ func (t *tab) runOutcome() map[string]any {
 		conn = t.ctx.conn
 	}
 	detail := t.shareResults || (conn != nil && conn.cfg().Driver != db.Postgres)
-	return runOutcome(t.run, detail)
+	return runOutcome(t.run, detail, t.shareResults)
 }
 
-func runOutcome(r *run, detail bool) map[string]any {
+// runOutcome describes a run. detail allows an error's detail; shared
+// allows a batch's PRINT and info messages, which can carry data.
+func runOutcome(r *run, detail, shared bool) map[string]any {
 	out := map[string]any{"statement": r.query}
 	if r.line > 0 {
 		out["statement_line"] = r.line + 1 // where a selection started
@@ -434,24 +437,52 @@ func runOutcome(r *run, detail bool) map[string]any {
 
 	res := r.res
 	out["duration_ms"] = res.Duration.Milliseconds()
-	if !res.HasRows() {
-		out["status"] = "done"
-		if res.HasAffected {
-			out["rows_affected"] = res.RowsAffected
-		}
-		return out
+	out["status"] = "done"
+	if res.Fetching() {
+		out["status"] = "fetching"
 	}
+	if res.HasAffected {
+		out["rows_affected"] = res.RowsAffected
+	}
+	sets := res.Sets()
+	if len(sets) > 0 {
+		// The first result at the top, as before batches had several.
+		first := setOutcome(sets[0])
+		for k, v := range first {
+			if k == "status" && out["status"] == "fetching" {
+				continue
+			}
+			out[k] = v
+		}
+	}
+	if len(sets) > 1 {
+		results := make([]map[string]any, len(sets))
+		for i, set := range sets {
+			results[i] = setOutcome(set)
+			results[i]["result"] = i + 1
+		}
+		out["results"] = results
+	}
+	if res.Batch != nil {
+		batchOutcome(out, res.Batch, shared)
+	}
+	return out
+}
+
+// setOutcome describes one result set: columns, rows, and whether it is
+// complete; never its rows.
+func setOutcome(set *db.RowSet) map[string]any {
 	type column struct {
 		Name string `json:"name"`
 		Type string `json:"type,omitempty"`
 	}
-	cols := res.Rows.Columns()
+	cols := set.Columns()
 	columns := make([]column, len(cols))
 	for i, c := range cols {
 		columns[i] = column{c.Name, c.Type}
 	}
-	out["columns"] = columns
-	p := res.Rows.Progress()
+	out := map[string]any{"columns": columns}
+	p := set.Progress()
 	out["rows"] = p.Rows
 	switch {
 	case !p.Done:
@@ -460,15 +491,44 @@ func runOutcome(r *run, detail bool) map[string]any {
 		out["status"] = "error"
 		out["error"] = map[string]any{"message": "fetching stopped: " + db.Describe(p.Err).Message}
 	case p.Stopped == db.StopLimit:
-		out["status"] = "done"
 		out["incomplete"] = "stopped at the memory limit; there are more rows"
 	case p.Stopped == db.StopCancelled:
-		out["status"] = "done"
 		out["incomplete"] = "the user stopped fetching; there are more rows"
-	default:
-		out["status"] = "done"
 	}
 	return out
+}
+
+// batchOutcome adds a batch's messages: row counts and errors always,
+// PRINT and info messages only when the tab is shared.
+func batchOutcome(out map[string]any, b *db.Batch, shared bool) {
+	msgs, dropped := b.Messages()
+	var lines []string
+	hidden := 0
+	for _, m := range msgs {
+		switch {
+		case m.Kind == db.MessageRows:
+			lines = append(lines, fmt.Sprintf("(%d rows affected)", m.Count))
+		case m.Kind == db.MessageError || shared:
+			lines = append(lines, m.Text)
+		default:
+			hidden++
+		}
+	}
+	if len(lines) > 0 {
+		out["messages"] = lines
+	}
+	if hidden > 0 {
+		out["messages_withheld"] = fmt.Sprintf("%d PRINT or info messages, shown only for tabs whose results the user shares", hidden)
+	}
+	if dropped > 0 {
+		out["messages_dropped"] = dropped
+	}
+	if err := b.Err(); err != nil && out["status"] == "done" {
+		out["batch_error"] = "a statement of the batch failed; see messages"
+	}
+	if b.Stopped() == db.StopLimit {
+		out["incomplete"] = "the batch stopped at the memory limit; later statements were not read"
+	}
 }
 
 // agentContext resolves the connection and database a tab should run on.
@@ -677,19 +737,34 @@ func (m *Model) agentReadResults(a agentArgs) (any, error) {
 	if !t.shareResults {
 		return nil, m.errNotShared()
 	}
-	return m.tabResults(t, a.Offset, a.Limit)
+	return m.tabResults(t, a.Result, a.Offset, a.Limit)
 }
 
 // tabResults is the outcome of a shared tab's last run with a page of its
 // rows.
-func (m *Model) tabResults(t *tab, offset, limit int) (map[string]any, error) {
+func (m *Model) tabResults(t *tab, result, offset, limit int) (map[string]any, error) {
 	r := t.run
 	if r == nil {
 		return nil, errors.New("the tab has not run yet: the user runs it; wait_for_run waits for that")
 	}
 	out := t.runOutcome()
-	if r.res != nil && r.res.HasRows() && !r.running {
-		out["page"] = resultPage(r.res.Rows, offset, limit)
+	if r.res == nil || r.running {
+		return out, nil
+	}
+	sets := r.res.Sets()
+	n := result
+	if n < 1 {
+		n = 1
+	}
+	switch {
+	case len(sets) == 0:
+	case n > len(sets):
+		return nil, fmt.Errorf("the run returned %d results; result %d does not exist", len(sets), n)
+	default:
+		out["page"] = resultPage(sets[n-1], offset, limit)
+		if len(sets) > 1 {
+			out["page_result"] = n
+		}
 	}
 	return out, nil
 }
@@ -769,10 +844,10 @@ func (w *runWaiter) finish(result any, err error) {
 // rows when the tab's results are shared.
 func (m *Model) runReport(t *tab) (any, error) {
 	if t.shareResults {
-		return m.tabResults(t, 0, pageRows)
+		return m.tabResults(t, 1, 0, pageRows)
 	}
 	out := t.runOutcome()
-	out["results"] = "not shared: " + m.errNotShared().Error()
+	out["rows_access"] = "not shared: " + m.errNotShared().Error()
 	return out, nil
 }
 

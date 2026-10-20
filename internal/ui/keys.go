@@ -54,6 +54,19 @@ var (
 		{keys: []string{"ctrl+u"}, desc: "Clear the text"},
 	}}
 
+	messagesKeys = keyScope{"Messages", []binding{
+		{keys: []string{"up", "k", "down", "j"}, desc: "Scroll"},
+		{keys: []string{"pgup", "ctrl+u", "pgdown", "ctrl+d"}, desc: "Page up / down"},
+		{keys: []string{"g", "ctrl+home", "G", "ctrl+end"}, desc: "First / last message"},
+		{keys: []string{"y"}, desc: "Copy the messages"},
+		{keys: []string{"esc"}, desc: "Back to the results"},
+	}}
+
+	passwordKeys = keyScope{"Password", []binding{
+		{keys: []string{"enter"}, desc: "Connect with it; it is kept in memory only"},
+		{keys: []string{"esc"}, desc: "Cancel"},
+	}}
+
 	scriptMenuKeys = keyScope{"Scripts", []binding{
 		{keys: []string{"up", "k", "down", "j"}, desc: "Move"},
 		{keys: []string{"home", "g", "end", "G"}, desc: "First / last script"},
@@ -69,6 +82,14 @@ var (
 		{keys: []string{"enter"}, desc: "Open the cell: view, copy, edit"},
 		{keys: []string{"y"}, desc: "Copy the cell"},
 		{keys: []string{"Y"}, desc: "Copy the row, tab-separated"},
+		{keys: []string{"[", "]"}, desc: "Previous / next result of the batch", when: func(m *Model) bool {
+			r := m.currentRun()
+			return r != nil && r.res != nil && len(r.res.Sets()) > 1
+		}},
+		{keys: []string{"m"}, desc: "The batch's messages: PRINT, row counts, errors", when: func(m *Model) bool {
+			msgs, _ := runMessages(m.currentRun())
+			return len(msgs) > 0
+		}},
 		{keys: []string{"esc"}, desc: "Stop fetching rows", when: func(m *Model) bool {
 			t := m.query.current()
 			return t != nil && t.run != nil && t.run.fetching()
@@ -97,7 +118,7 @@ var (
 		{keys: []string{"ctrl+home", "ctrl+end"}, desc: "Start / end of the text"},
 		{keys: []string{"ctrl+a"}, desc: "Select all"},
 		{keys: []string{"ctrl+c", "ctrl+x"}, desc: "Copy / cut (the line, without a selection)"},
-		{keys: []string{"ctrl+v"}, desc: "Paste what rimor copied"},
+		{keys: []string{"ctrl+v"}, desc: "Paste the clipboard, if the terminal shares it; else what rimor copied"},
 		{keys: []string{"ctrl+z"}, desc: "Undo"},
 		{keys: []string{"ctrl+y", "ctrl+shift+z"}, desc: "Redo"},
 		{keys: []string{"enter"}, desc: "New line, keeping the indentation"},
@@ -179,8 +200,8 @@ var (
 // allScopes is every key table, in the order the "all keys" view lists
 // them after the app-wide keys.
 var allScopes = []keyScope{
-	paneKeys, explorerKeys, explorerFilterKeys, tabKeys, editorKeys, resultsKeys, cellKeys,
-	connFormKeys, pickerKeys, scriptMenuKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
+	paneKeys, explorerKeys, explorerFilterKeys, tabKeys, editorKeys, resultsKeys, messagesKeys, cellKeys,
+	connFormKeys, passwordKeys, pickerKeys, scriptMenuKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
 }
 
 // hereScopes are the key tables that apply where the user is, and a name
@@ -204,6 +225,8 @@ func (m *Model) hereScopes() (string, []keyScope) {
 		return "Query context", []keyScope{pickerKeys}
 	case *scriptMenu:
 		return "Scripts", []keyScope{scriptMenuKeys}
+	case *passwordPrompt:
+		return "Password", []keyScope{passwordKeys}
 	}
 	if m.focus == focusExplorer && m.explorer.filtering {
 		return "Explorer filter", []keyScope{explorerFilterKeys}
@@ -212,6 +235,9 @@ func (m *Model) hereScopes() (string, []keyScope) {
 	case focusQuery:
 		return "Query", []keyScope{tabKeys, editorKeys}
 	case focusResults:
+		if r := m.currentRun(); r != nil && r.messages {
+			return "Messages", []keyScope{messagesKeys, resultsKeys, paneKeys}
+		}
 		return "Results", []keyScope{resultsKeys, paneKeys}
 	}
 	return "Explorer", []keyScope{explorerKeys, paneKeys}

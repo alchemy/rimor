@@ -391,7 +391,9 @@ footer.wrap {
           background, stored compactly enough for millions of them. Scroll by
           row and by column; <kbd>esc</kbd> stops fetching and keeps what
           arrived. A failure shows the database's own message and code, with
-          a caret where it points in your SQL.</dd>
+          a caret where it points in your SQL. A SQL Server batch keeps every
+          result and its messages: <code>PRINT</code>, statistics, row counts,
+          errors in place.</dd>
       </div>
       <div>
         <dt>Editing</dt>
@@ -453,7 +455,9 @@ footer.wrap {
 <span class="prompt">$ </span>cd rimor &amp;&amp; go build ./cmd/rimor</pre>
       </div>
     </div>
-    <p class="after">Press <kbd>a</kbd> in the explorer to add a connection.
+    <p class="after">Press <kbd>a</kbd> in the explorer to add a connection,
+      or give one on the command line for a session that is saved nowhere:
+      <code>rimor ./app.db</code>, <code>rimor postgres://me@host/db</code>.
       Settings live in <code>~/.config/rimor/config.toml</code>, written with
       every default on first run. Once a day rimor asks GitHub whether a newer
       release is out, and says so in the explorer;

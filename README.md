@@ -63,6 +63,10 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   change data show the rows affected. Errors show the database's code and
   message, plus the failing line with a caret where the driver reports a
   position.
+- **Batches and messages.** A SQL Server batch shows every result it
+  returns (`[` and `]` switch between them) and, with `m`, its messages in
+  order: `PRINT`, `SET STATISTICS` output, each statement's rows affected,
+  and errors where they happened.
 - **Cell viewer and editing.** `enter` on a result cell opens its full value,
   selected for copying. When the result comes from one table and includes
   its key, the value can be edited there: rimor shows the `UPDATE` it will
@@ -199,6 +203,32 @@ then refuses writes, and on SQLite the engine does. SQL Server has no
 read-only session setting, so rimor refuses statements that write, `EXEC`
 included; for a hard guarantee, use a login without write permissions.
 
+### One-shot sessions
+
+To look at a database once, without adding it to your connections, give it
+on the command line:
+
+```sh
+rimor ./app.db
+rimor postgres://me@db.local/erp
+rimor -readonly sqlserver://sa@sql.local?database=erp
+rimor "host=db.local dbname=erp user=me"
+```
+
+rimor recognises PostgreSQL and SQL Server connection strings, in URL or
+key=value form, and SQLite files, which must exist. The connection comes
+first in the explorer, marked *temporary*, with a tab open on it; your saved
+connections are there too. Nothing about it is saved: not in
+`connections.json`, not in the keychain, and your session is neither
+restored nor saved, so your usual tabs are there the next time you start
+rimor without one. To keep the connection, press `e` on it and save it.
+`-readonly` works like the connection form's read-only option.
+
+Leave the password out: a password on the command line ends up in your
+shell history, and other users of the machine can see it in the process
+list. When the server asks for one, rimor asks you and keeps it in memory
+only. `~/.pgpass`, `PGPASSWORD` and Windows authentication work too.
+
 ## AI agents
 
 rimor can work alongside an AI agent. With rimor open in one terminal and,
@@ -262,8 +292,10 @@ still review and run every query.
 - When the agent's SQL may write (`UPDATE`, `DROP`, `EXEC` and the like), the
   reminder under it turns into a warning. For diagnostics, a read-only
   connection makes sure nothing can.
-- rimor shows only the first result set of a batch, so the agent runs one
-  query at a time.
+- A SQL Server batch can return several results: the agent sees each one's
+  columns and row count, reads any of them, and sees the batch's row counts
+  and errors. `PRINT` and `SET STATISTICS` output reach it only for a shared
+  tab, since they can carry data.
 
 Rows you share go to the agent's model provider, like everything the agent
 reads. It also reads your catalog, comments included. To turn agent access off, set `agent = false` in
@@ -328,7 +360,9 @@ and `esc` puts the tree back as it was.
 
 **Results:** `enter` opens the cell, `esc` stops fetching, the arrows or `hjkl` move, `pgup`/`pgdn` page, `g`/`G` jump to the
 first or last row, `home`/`end` to the first or last column, `y` copies the
-cell, `Y` copies the row.
+cell, `Y` copies the row. For a SQL Server batch with several results, `[`
+and `]` switch between them (the status shows `[2/3]`), and `m` shows the
+batch's messages; `y` there copies them.
 
 Outside the editor, `tab` cycles focus, `?` shows the keys and `q` quits. The mouse focuses panes
 and drags the borders between them; a double click on a border resets it.
@@ -386,17 +420,22 @@ results) are not remappable yet.
   classified: the server reports what they produce, so `DECLARE …; SELECT …`
   shows its rows and a batch that only writes shows the rows affected.
 - On PostgreSQL a row-returning query must be a single statement; select it
-  to run one of several. SQL Server batches work, and the first result set
-  with columns is shown.
+  to run one of several. SQL Server batches return all their results.
+- Only the first result of a SQL Server batch can be edited.
 - A result's rows stay in memory, up to `result_memory_mb` (512 MB by
-  default); fetching stops there and keeps what arrived. Spilling larger
+  default, shared by all the results of a batch); fetching stops there and
+  keeps what arrived, and a batch says it was not read to its end. Spilling larger
   results to disk is planned.
 - A schema counts as empty when the login sees no objects, user types or XML
   schema collections in it, so a schema whose objects you lack permission
   to see is hidden too. The note under the database says how many are
   hidden, and `.` shows them.
-- Copying uses the terminal's clipboard support (OSC 52), which
-  Terminal.app lacks and iTerm2 has off by default.
+- The clipboard goes through the terminal (OSC 52). Copying works in most
+  terminals, but not Terminal.app, and iTerm2 has it off by default; in tmux,
+  set `set-clipboard on`. `ctrl+v` asks the terminal for the clipboard:
+  kitty and Ghostty ask you first, Alacritty needs `osc52 = "CopyPaste"`,
+  and where the terminal does not answer, rimor pastes what it copied
+  itself. The terminal's own paste (`ctrl+shift+v`, `cmd+v`) always works.
 
 ## Releasing
 
