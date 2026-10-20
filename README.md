@@ -99,7 +99,10 @@ Windows on amd64 and arm64.
   unpacking; on Windows, SmartScreen may ask you to confirm.
 - **Arch Linux:** `rimor` (built from source) or `rimor-bin` (prebuilt) from
   the AUR, e.g. `yay -S rimor`.
-- **With Go** 1.27 or newer: `go install rimor.dev/cmd/rimor@latest`.
+- **With Go** 1.27 or newer: `go install rimor.dev/cmd/rimor@latest`. Right
+  after a release, `@latest` can still give the previous version for up to
+  half an hour, while Go's module proxy refreshes; name the version
+  (`@v0.8.1`) to get it at once.
 - **From a checkout:** `go build ./cmd/rimor`.
 
 `rimor -version` prints the version.

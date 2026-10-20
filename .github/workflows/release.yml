@@ -147,6 +147,30 @@ jobs:
             "${flags[@]}" \
             dist/*
 
+  goproxy:
+    name: Go module proxy
+    needs: release
+    if: needs.release.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask the proxy for the new version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # go install rimor.dev/cmd/rimor@latest goes through
+          # proxy.golang.org, which learns of a tag when someone asks for it
+          # and caches its @latest answer. Asking for the version by name
+          # makes it fetch the tag now; @latest follows when its cache
+          # expires.
+          for i in 1 2 3 4 5; do
+            if curl -fsS "https://proxy.golang.org/rimor.dev/@v/${TAG}.info"; then
+              echo
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "The proxy did not serve ${TAG}; it will fetch it on first use." >&2
+
   aur:
     name: AUR
     needs: release

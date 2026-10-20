@@ -68,7 +68,9 @@ func updatePath() string {
 func release(s update.State, announce bool) ui.UpdateMsg {
 	msg := ui.UpdateMsg{Latest: s.Latest, URL: s.URL, Announce: announce}
 	if goInstalled() {
-		msg.Command = "go install rimor.dev/cmd/rimor@latest"
+		// The version itself: the module proxy's answer for @latest is
+		// cached and can lag a new release by half an hour.
+		msg.Command = "go install rimor.dev/cmd/rimor@" + s.Latest
 	}
 	return msg
 }
