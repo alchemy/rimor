@@ -35,7 +35,7 @@ type txCheckedMsg struct {
 
 // busy reports whether the tab's session is in use: a run, or the check
 // that follows it.
-func (t *tab) busy() bool { return t.run.busy() || t.txChecking }
+func (t *tab) busy() bool { return t.run.busy() || t.txChecking || t.exporting }
 
 // checkTx asks the tab's session about its transaction, once its run is
 // over.

@@ -335,7 +335,11 @@ func hasControl(b []byte) bool {
 	return false
 }
 
-func formatValue(v any, typ string) Value {
+func formatValue(v any, typ string) Value { return formatCell(v, typ, 32) }
+
+// formatCell formats a value as the grid shows it; binary values are cut
+// after show bytes, or kept whole when show is 0 (exports).
+func formatCell(v any, typ string, show int) Value {
 	switch v := v.(type) {
 	case nil:
 		return Value{Text: "NULL", Null: true}
@@ -357,7 +361,9 @@ func formatValue(v any, typ string) Value {
 		if utf8.Valid(v) && !hasControl(v) {
 			return Value{Text: string(v)}
 		}
-		const show = 32
+		if show <= 0 {
+			show = len(v)
+		}
 		s := "0x" + strings.ToUpper(hex.EncodeToString(v[:min(len(v), show)]))
 		if len(v) > show {
 			s += "…"

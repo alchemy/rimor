@@ -78,6 +78,8 @@ type tab struct {
 	// txChecking while that check runs (see tx.go).
 	tx         db.TxState
 	txChecking bool
+	// exporting while an export runs the statement again on the session.
+	exporting bool
 
 	// Statements run on a connection of their own, opened on first run.
 	session    *sql.Conn

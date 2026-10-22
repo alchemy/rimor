@@ -76,6 +76,14 @@ var (
 		{keys: []string{"esc"}, desc: "Cancel: keep the transaction open"},
 	}}
 
+	exportKeys = keyScope{"Export", []binding{
+		{keys: []string{"up", "shift+tab", "down"}, desc: "Previous / next field"},
+		{keys: []string{"left", "right", "space"}, desc: "Change the choice"},
+		{keys: []string{"tab"}, desc: "Next field; in the file name, complete it"},
+		{keys: []string{"enter"}, desc: "Export"},
+		{keys: []string{"esc"}, desc: "Cancel, or stop a running export"},
+	}}
+
 	scriptMenuKeys = keyScope{"Scripts", []binding{
 		{keys: []string{"up", "k", "down", "j"}, desc: "Move"},
 		{keys: []string{"home", "g", "end", "G"}, desc: "First / last script"},
@@ -91,6 +99,7 @@ var (
 		{keys: []string{"enter"}, desc: "Open the cell: view, copy, edit"},
 		{keys: []string{"y"}, desc: "Copy the cell"},
 		{keys: []string{"Y"}, desc: "Copy the row, tab-separated"},
+		{keys: []string{"e"}, desc: "Export the result: CSV, JSON, INSERTs…"},
 		{keys: []string{"[", "]"}, desc: "Previous / next result of the batch", when: func(m *Model) bool {
 			r := m.currentRun()
 			return r != nil && r.res != nil && len(r.res.Sets()) > 1
@@ -210,7 +219,7 @@ var (
 // them after the app-wide keys.
 var allScopes = []keyScope{
 	paneKeys, explorerKeys, explorerFilterKeys, tabKeys, editorKeys, resultsKeys, messagesKeys, cellKeys,
-	connFormKeys, passwordKeys, pickerKeys, scriptMenuKeys, txKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
+	connFormKeys, passwordKeys, pickerKeys, scriptMenuKeys, exportKeys, txKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
 }
 
 // hereScopes are the key tables that apply where the user is, and a name
@@ -236,6 +245,8 @@ func (m *Model) hereScopes() (string, []keyScope) {
 		return "Scripts", []keyScope{scriptMenuKeys}
 	case *txDialog:
 		return "Open transaction", []keyScope{txKeys}
+	case *exportDialog:
+		return "Export", []keyScope{exportKeys}
 	case *passwordPrompt:
 		return "Password", []keyScope{passwordKeys}
 	}

@@ -96,16 +96,24 @@ func (p *pathPrompt) setWidth(maxWidth int) {
 
 // refreshMatches lists directory entries that complete the current value.
 func (p *pathPrompt) refreshMatches() {
-	value := p.input.Value()
+	p.matches = pathMatches(p.input.Value(), func(name string, prefix string) bool {
+		// Without a prefix, opening offers SQL files and folders only.
+		return p.purpose != pathOpen || strings.EqualFold(filepath.Ext(name), ".sql") || prefix != ""
+	})
+}
+
+// pathMatches lists the entries of value's folder that complete it:
+// folders (ending in a separator) first, then the files keep accepts.
+func pathMatches(value string, keep func(name, prefix string) bool) []string {
 	dir, prefix := filepath.Split(absPath(value))
 	if endsWithSeparator(value) {
 		dir, prefix = absPath(value), ""
 	}
 	entries, err := os.ReadDir(dir)
-	p.matches = nil
 	if err != nil {
-		return
+		return nil
 	}
+	var matches []string
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasPrefix(name, prefix) || (strings.HasPrefix(name, ".") && !strings.HasPrefix(prefix, ".")) {
@@ -113,13 +121,13 @@ func (p *pathPrompt) refreshMatches() {
 		}
 		if e.IsDir() {
 			name += string(filepath.Separator)
-		} else if p.purpose == pathOpen && !strings.EqualFold(filepath.Ext(name), ".sql") && prefix == "" {
-			continue // without a prefix, offer SQL files and folders only
+		} else if !keep(name, prefix) {
+			continue
 		}
-		p.matches = append(p.matches, name)
+		matches = append(matches, name)
 	}
 	// Folders first, then files, each alphabetically.
-	slices.SortStableFunc(p.matches, func(a, b string) int {
+	slices.SortStableFunc(matches, func(a, b string) int {
 		ad, bd := endsWithSeparator(a), endsWithSeparator(b)
 		if ad != bd {
 			if ad {
@@ -129,24 +137,30 @@ func (p *pathPrompt) refreshMatches() {
 		}
 		return strings.Compare(a, b)
 	})
+	return matches
 }
 
 // complete extends the value to the longest prefix shared by the matches.
 func (p *pathPrompt) complete() {
-	if len(p.matches) == 0 {
-		return
+	if value, ok := completePath(p.input.Value(), p.matches); ok {
+		p.input.SetValue(value)
+		p.input.CursorEnd()
+		p.refreshMatches()
 	}
-	common := p.matches[0]
-	for _, m := range p.matches[1:] {
+}
+
+// completePath extends a path to the longest prefix its matches share.
+func completePath(value string, matches []string) (string, bool) {
+	if len(matches) == 0 {
+		return value, false
+	}
+	common := matches[0]
+	for _, m := range matches[1:] {
 		for !strings.HasPrefix(m, common) {
 			common = common[:len(common)-1]
 		}
 	}
-	value := p.input.Value()
-	dir := value[:lastSeparator(value)+1]
-	p.input.SetValue(dir + common)
-	p.input.CursorEnd()
-	p.refreshMatches()
+	return value[:lastSeparator(value)+1] + common, true
 }
 
 func (p *pathPrompt) submit() tea.Cmd {

@@ -63,6 +63,10 @@ It supports **PostgreSQL**, **MySQL** and **MariaDB**, **SQL Server** and **SQLi
   change data show the rows affected. Errors show the database's code and
   message, plus the failing line with a caret where the driver reports a
   position.
+- **Export.** `e` in the results writes the result as CSV, TSV, JSON, JSON
+  Lines, SQL `INSERT`s or Markdown, to a file or the clipboard; when only
+  part of a large result is in memory, it can run the query again into the
+  file. See [Exporting results](#exporting-results).
 - **Batches and messages.** A SQL Server batch shows every result it
   returns (`[` and `]` switch between them) and, with `m`, its messages in
   order: `PRINT`, `SET STATISTICS` output, each statement's rows affected,
@@ -178,6 +182,43 @@ column each result column comes from, which editing needs to be safe. The update
 the cell still holds the value it was opened with; otherwise rimor says the
 row changed and leaves it alone. It runs on the tab's connection, so inside
 an open transaction it can still be rolled back.
+
+## Exporting results
+
+`e` in the results opens the export dialog. `↑`/`↓` move between its
+fields, `←`/`→` change a choice, and `enter` exports.
+
+| Format | Notes |
+|---|---|
+| CSV | a header row, RFC 4180 quoting, `;` or `,`, an optional BOM for Excel |
+| TSV | tabs, quoted where a value holds a tab, a quote or a line break |
+| JSON | an array of objects: numbers as numbers in numeric columns, `true`/`false`, JSON columns as JSON, `NULL` as `null` |
+| JSON Lines | one object per line, for large results and tools such as `jq` |
+| SQL | `INSERT`s of 100 rows each, in the tab's dialect, into the result's table when it comes from one, else `result` |
+| Markdown | a table for issues and documents |
+
+- **The CSV separator** follows the system: `;` where numbers are written
+  with a decimal comma (Italian, German, French…; on Windows, the list
+  separator in the region settings), `,` elsewhere. The other one is a key
+  away, and the choice is remembered, with the format, how CSV writes
+  `NULL` (empty, `NULL` or `\N`) and the folder, in `export.json` beside the
+  session.
+- **Decimals** follow the locale too, but only in a CSV separated by `;`:
+  there, numeric columns write `120,5` where the locale writes decimals with
+  a comma, as its spreadsheets expect, and the dialog says so. A CSV
+  separated by `,` always writes `120.5`, and so do the other formats. Text
+  columns are never changed: a version such as `1.2.3` keeps its dots.
+- **Values** are written as the grid shows them, so an export matches what
+  you saw; binary values longer than 32 bytes, which the grid cuts, are cut
+  in it too.
+- **To the clipboard** for small results: terminals pass about 1 MB through
+  it, so larger exports go to a file.
+- **Every row of a large result:** fetching stops at `result_memory_mb`, and
+  the dialog then says not every row is here. **Rows: all** runs the
+  statement again on the tab's session, so temp tables still apply, and
+  streams every row into the file without the limit, binary values whole;
+  `esc` stops it. It is offered only for statements that do not write, since
+  running a write twice could change data twice.
 
 ## Connections
 
@@ -381,7 +422,7 @@ and `esc` puts the tree back as it was.
 
 **Results:** `enter` opens the cell, `esc` stops fetching, the arrows or `hjkl` move, `pgup`/`pgdn` page, `g`/`G` jump to the
 first or last row, `home`/`end` to the first or last column, `y` copies the
-cell, `Y` copies the row. For a SQL Server batch with several results, `[`
+cell, `Y` copies the row, `e` exports the result. For a SQL Server batch with several results, `[`
 and `]` switch between them (the status shows `[2/3]`), and `m` shows the
 batch's messages; `y` there copies them.
 

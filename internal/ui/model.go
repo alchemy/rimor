@@ -270,6 +270,18 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.usePassword(msg)
 	case UpdateMsg:
 		return m.updateMsg(msg)
+	case exportRequestMsg:
+		if r := msg.tab.run; r == nil || r.set() == nil {
+			return nil
+		}
+		d, cmd := m.newExportDialog(msg.tab)
+		m.modal = d
+		return cmd
+	case exportOriginMsg:
+		m.exportOrigin(msg)
+		return nil
+	case exportDoneMsg:
+		return m.exportDone(msg)
 	case scriptsReadyMsg:
 		return m.scriptsReady(msg)
 	case openScriptMsg:

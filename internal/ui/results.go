@@ -357,6 +357,8 @@ func (rp *ResultsPane) Update(msg tea.KeyPressMsg, t *tab) tea.Cmd {
 			row, col := g.row, g.col
 			return func() tea.Msg { return openCellMsg{t, row, col} }
 		}
+	case "e":
+		return func() tea.Msg { return exportRequestMsg{t} }
 	case "Y":
 		if g.row < n {
 			cells := make([]string, cols)
