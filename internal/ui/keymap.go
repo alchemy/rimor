@@ -110,7 +110,7 @@ var repeatable = map[string]bool{
 func (m *Model) do(action string) tea.Cmd {
 	switch action {
 	case "quit":
-		return tea.Quit
+		return m.quit()
 	case "help":
 		m.help = newHelp(m)
 	case "focus_explorer":

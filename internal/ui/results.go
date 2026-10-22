@@ -110,7 +110,7 @@ func watchRows(t *tab, gen int, res *db.Result) tea.Cmd {
 
 // Run executes the selection, or the whole tab, on the tab's session.
 func (q *QueryPane) Run(t *tab) tea.Cmd {
-	if t.run.busy() {
+	if t.busy() {
 		return nil
 	}
 	q.notice = "" // such as the agent's reminder to review
@@ -139,6 +139,7 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 	t.sessionCtx = t.ctx
 
 	gen, pool, database, session := t.runs, t.ctx.conn.pool, t.ctx.database, t.session
+	inTx := session != nil && t.tx.Open
 	cfg := t.ctx.conn.cfg()
 	opts := db.RunOptions{
 		MemoryLimit: q.memoryLimit, Cancel: cancel,
@@ -159,6 +160,10 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 			// Run releases the context itself, when the statement or the
 			// fetch of its rows ends.
 			res, err := db.Run(ctx, session, text, opts)
+			if err != nil && inTx && db.IsConnLost(err) {
+				// A fresh session would run it outside the transaction.
+				return runDoneMsg{tab: t, gen: gen, err: fmt.Errorf("%w: %w", errTxLost, err), session: session}
+			}
 			if err != nil && attempt == 0 && db.IsConnLost(err) {
 				go pool.Release(session) // the connection went away; retry on a fresh one
 				session = nil
@@ -212,7 +217,7 @@ func (q *QueryPane) finish(msg runDoneMsg) tea.Cmd {
 	if r.res != nil && r.res.Fetching() {
 		return watchRows(t, r.gen, r.res)
 	}
-	return nil
+	return q.checkTx(t)
 }
 
 // rowsArrived handles a rowsMsg: keep watching until fetching ends.
@@ -232,7 +237,7 @@ func (q *QueryPane) rowsArrived(msg rowsMsg) tea.Cmd {
 		r.err = &e
 	}
 	t.releaseIfStale()
-	return nil
+	return q.checkTx(t)
 }
 
 // releaseIfStale drops the session once the run is over if the tab was
@@ -266,10 +271,11 @@ func (t *tab) dropSession() {
 		return
 	}
 	s := t.session
+	t.tx = db.TxState{} // closing rolls it back
 	if conn := t.sessionCtx.conn; conn != nil {
 		go conn.pool.Release(s)
 	} else {
-		go s.Close()
+		go db.CloseSession(s)
 	}
 	t.session = nil
 }

@@ -72,6 +72,11 @@ type tab struct {
 	// wantResults records that the agent asked. Neither is saved.
 	shareResults, wantResults bool
 
+	// tx is the session's transaction, as checked after the last run;
+	// txChecking while that check runs (see tx.go).
+	tx         db.TxState
+	txChecking bool
+
 	// Statements run on a connection of their own, opened on first run.
 	session    *sql.Conn
 	sessionCtx queryContext // context the session belongs to
@@ -303,6 +308,9 @@ func (q *QueryPane) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case runDoneMsg:
 		return q.finish(msg)
+	case txCheckedMsg:
+		q.txChecked(msg)
+		return nil
 	case rowsMsg:
 		return q.rowsArrived(msg)
 	case spinner.TickMsg:
@@ -333,11 +341,7 @@ func (q *QueryPane) Update(msg tea.Msg) tea.Cmd {
 	if isKey {
 		switch key.String() {
 		case "ctrl+w":
-			if t.dirty() {
-				return func() tea.Msg { return confirmCloseTabMsg{t} }
-			}
-			q.Close(t)
-			return nil
+			return func() tea.Msg { return closeTabRequestMsg{t} }
 		case "ctrl+s":
 			if t.path == "" {
 				return func() tea.Msg { return promptPathMsg{purpose: pathSaveAs, tab: t} }
@@ -452,6 +456,9 @@ func (q *QueryPane) Status() string {
 		return ""
 	}
 	s := t.ctx.render()
+	if note := txMarker(t); note != "" {
+		s += mutedStyle.Render(" · ") + note
+	}
 	ic := iconAgent.String()
 	switch {
 	case t.shareResults:

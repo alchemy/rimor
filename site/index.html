@@ -372,8 +372,10 @@ footer.wrap {
         <dd>Each tab knows where it runs, a connection and a database, and shows
           it at the bottom. Open a tab from anything in the tree and it starts
           there. Each runs on its own connection, so <code>USE</code>, temp tables
-          and open transactions carry over. Tabs save to <code>.sql</code> files,
-          and unsaved work is still there the next time you start.</dd>
+          and open transactions carry over; a tab says when it is inside a
+          transaction, and closing it asks whether to commit or roll back. Tabs
+          save to <code>.sql</code> files, and unsaved work is still there the
+          next time you start.</dd>
       </div>
       <div>
         <dt>AI agents</dt>

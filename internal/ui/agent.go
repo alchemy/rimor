@@ -591,6 +591,9 @@ func (m *Model) agentUpdate(a agentArgs) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if ctx != t.ctx && t.tx.Open {
+			return nil, errors.New("the tab has an open transaction: the user must commit or roll it back before it can move to another connection")
+		}
 		t.setContext(ctx)
 	}
 	t.ed.ReplaceText(a.SQL)

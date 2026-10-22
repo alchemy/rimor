@@ -42,12 +42,26 @@ func (p *Pool) Session(ctx context.Context, database string) (*sql.Conn, error) 
 	return s, nil
 }
 
-// Release closes a session from Session.
+// Release ends a session from Session by closing its connection, which is
+// never returned to the pool: it may hold an open transaction, temp tables
+// or settings (SET, USE) that must not reach the pool's next user, and
+// closing makes the server roll back the transaction at once rather than
+// when the connection is next reused (or, with SQLite, not at all).
 func (p *Pool) Release(s *sql.Conn) {
 	p.mu.Lock()
 	delete(p.sessions, s)
 	p.mu.Unlock()
-	s.Close()
+	CloseSession(s)
+}
+
+// CloseSession closes a session's connection instead of pooling it:
+// database/sql closes a connection when Raw's function reports it bad.
+// It waits for the session's open rows, like Close.
+func CloseSession(s *sql.Conn) {
+	err := s.Raw(func(any) error { return driver.ErrBadConn })
+	if err != nil && !errors.Is(err, driver.ErrBadConn) && !errors.Is(err, sql.ErrConnDone) {
+		s.Close()
+	}
 }
 
 // IsConnLost reports whether an error means the session's connection is

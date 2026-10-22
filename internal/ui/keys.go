@@ -67,6 +67,15 @@ var (
 		{keys: []string{"esc"}, desc: "Cancel"},
 	}}
 
+	txKeys = keyScope{"Open transaction", []binding{
+		{keys: []string{"c"}, desc: "Commit, then go ahead", when: func(m *Model) bool {
+			d, _ := m.modal.(*txDialog)
+			return d != nil && !d.anyFailed()
+		}},
+		{keys: []string{"r"}, desc: "Roll back, then go ahead"},
+		{keys: []string{"esc"}, desc: "Cancel: keep the transaction open"},
+	}}
+
 	scriptMenuKeys = keyScope{"Scripts", []binding{
 		{keys: []string{"up", "k", "down", "j"}, desc: "Move"},
 		{keys: []string{"home", "g", "end", "G"}, desc: "First / last script"},
@@ -201,7 +210,7 @@ var (
 // them after the app-wide keys.
 var allScopes = []keyScope{
 	paneKeys, explorerKeys, explorerFilterKeys, tabKeys, editorKeys, resultsKeys, messagesKeys, cellKeys,
-	connFormKeys, passwordKeys, pickerKeys, scriptMenuKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
+	connFormKeys, passwordKeys, pickerKeys, scriptMenuKeys, txKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
 }
 
 // hereScopes are the key tables that apply where the user is, and a name
@@ -225,6 +234,8 @@ func (m *Model) hereScopes() (string, []keyScope) {
 		return "Query context", []keyScope{pickerKeys}
 	case *scriptMenu:
 		return "Scripts", []keyScope{scriptMenuKeys}
+	case *txDialog:
+		return "Open transaction", []keyScope{txKeys}
 	case *passwordPrompt:
 		return "Password", []keyScope{passwordKeys}
 	}

@@ -76,7 +76,15 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   server (PostgreSQL) or the engine (SQLite) refuses writes, and on SQL Server
   rimor refuses statements that write.
 - **Sessions per tab.** Each tab runs on its own connection, so `USE`, `SET`,
-  temp tables and open transactions carry over between runs.
+  temp tables and open transactions carry over between runs. A tab inside a
+  transaction says so in its status line (`in transaction`, or `failed
+  transaction` when only a rollback can end it). Closing the tab, changing
+  its context, quitting, or disconnecting, editing or deleting its
+  connection first asks whether to commit or roll back; a failed
+  transaction can only be rolled back. The connection is then closed,
+  never handed to another tab or the explorer. If the connection is lost
+  inside a transaction, rimor says so: the server has rolled it back, and
+  the statement is not run again outside it.
 - **Layout.** Drag the borders between panes, or resize from the keyboard.
   Any pane can go full screen.
 - **AI agents.** An agent such as Claude Code, in another terminal, can

@@ -185,14 +185,21 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case saveConnectionMsg:
 		m.modal = nil
-		if msg.conn != nil {
-			m.query.StopConnection(msg.conn) // editing closes its sessions
+		if msg.conn == nil {
+			return m.update(saveConnNowMsg{msg})
 		}
-		m.explorer.Upsert(msg.conn, msg.cfg)
+		return m.guardTx(m.query.tabsOn(msg.conn), saveConnNowMsg{msg})
+	case saveConnNowMsg:
+		if msg.msg.conn != nil {
+			m.query.StopConnection(msg.msg.conn) // editing closes its sessions
+		}
+		m.explorer.Upsert(msg.msg.conn, msg.msg.cfg)
 		m.setFocus(focusExplorer)
 		return nil
 	case deleteConnectionMsg:
 		m.modal = nil
+		return m.guardTx(m.query.tabsOn(msg.conn), deleteConnNowMsg{msg.conn})
+	case deleteConnNowMsg:
 		m.query.StopConnection(msg.conn)
 		m.explorer.Remove(msg.conn)
 		m.query.ForgetConnection(msg.conn)
@@ -202,6 +209,16 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	// Tabs and files.
 	case confirmCloseTabMsg:
 		m.modal = confirmCloseTab{msg.tab}
+		return nil
+	case closeTabRequestMsg:
+		return m.guardTx([]*tab{msg.tab}, closeTabNowMsg{msg.tab})
+	case closeTabNowMsg:
+		if msg.tab.dirty() {
+			m.modal = confirmCloseTab{msg.tab}
+			return nil
+		}
+		m.query.Close(msg.tab)
+		m.saveSession()
 		return nil
 	case closeTabMsg:
 		m.modal = nil
@@ -229,9 +246,20 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.explorer.Expand(msg.conn)
 	case contextChosenMsg:
 		m.modal = nil
+		if msg.ctx == msg.tab.ctx {
+			return nil
+		}
+		return m.guardTx([]*tab{msg.tab}, applyContextMsg{msg.tab, msg.ctx})
+	case applyContextMsg:
 		msg.tab.setContext(msg.ctx)
 		m.saveSession()
 		return nil
+	case quitNowMsg:
+		return tea.Quit
+	case txEndedMsg:
+		return m.txEnded(msg)
+	case txCheckedMsg:
+		return m.query.Update(msg)
 
 	case AgentRequestMsg:
 		return m.agentRequest(msg)
@@ -291,6 +319,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 	case disconnectMsg:
+		return m.guardTx(m.query.tabsOn(msg.conn), disconnectNowMsg{msg.conn})
+	case disconnectNowMsg:
 		m.query.StopConnection(msg.conn)
 		m.explorer.disconnect(msg.conn)
 		return nil
@@ -371,7 +401,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	action, bound := m.keys.direct[key]
 	if bound && action == "quit" {
-		return tea.Quit
+		return m.quit()
 	}
 	// The help overlay takes every key while open; the help key opens it
 	// from anywhere, a dialog included.
@@ -410,7 +440,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Panes without text input keep single-key shortcuts.
 	switch key {
 	case "q", "ctrl+c":
-		return tea.Quit
+		return m.quit()
 	case "tab":
 		m.setFocus((m.focus + 1) % focusCount)
 		return nil
