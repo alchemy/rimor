@@ -27,7 +27,7 @@ func TestParseTarget(t *testing.T) {
 		{"postgres://me@db.local", Postgres, "db.local"},
 		{"host=db.local dbname=erp user=me", Postgres, "db.local › erp"},
 		{"dbname=erp", Postgres, "localhost › erp"},
-		{"sqlserver://sa@sql.local?database=MsEasyCo", SQLServer, "sql.local › MsEasyCo"},
+		{"sqlserver://sa@sql.local?database=Sales", SQLServer, "sql.local › Sales"},
 		{"sqlserver://sa@sql.local/SQLEXPRESS?database=erp", SQLServer, `sql.local\SQLEXPRESS › erp`},
 		{"server=sql.local;user id=sa;database=erp", SQLServer, "sql.local › erp"},
 		{"Data Source=sql.local;Initial Catalog=erp", SQLServer, "sql.local › erp"},
