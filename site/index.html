@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rimor, a terminal workbench for SQL databases</title>
-<meta name="description" content="Browse the catalog, write SQL in tabs and scroll through millions of rows, in your terminal. For PostgreSQL, SQL Server and SQLite.">
+<meta name="description" content="Browse the catalog, write SQL in tabs and scroll through millions of rows, in your terminal. For PostgreSQL, MySQL and MariaDB, SQL Server and SQLite.">
 <meta name="go-import" content="rimor.dev git https://github.com/alchemy/rimor">
 <meta name="go-source" content="rimor.dev https://github.com/alchemy/rimor https://github.com/alchemy/rimor/tree/master{/dir} https://github.com/alchemy/rimor/blob/master{/dir}/{file}#L{line}">
 <meta property="og:title" content="rimor">
-<meta property="og:description" content="A terminal workbench for PostgreSQL, SQL Server and SQLite.">
+<meta property="og:description" content="A terminal workbench for PostgreSQL, MySQL, SQL Server and SQLite.">
 <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#fcfcfc" media="(prefers-color-scheme: light)">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23000000'/%3E%3Cpath d='M3 4h10v8H3z' fill='none' stroke='%23ffffff' stroke-width='1.4'/%3E%3Cpath d='M3 7h10' stroke='%23ffffff' stroke-width='1.4'/%3E%3C/svg%3E">
@@ -251,7 +251,7 @@ footer.wrap {
       <p class="gloss">Latin: I probe, I search thoroughly.</p>
     </div>
     <div>
-      <p class="lede">A terminal workbench for PostgreSQL, SQL&nbsp;Server and SQLite.
+      <p class="lede">A terminal workbench for PostgreSQL, MySQL, SQL&nbsp;Server and SQLite.
         Browse the catalog, write SQL in tabs and scroll through millions of
         rows without leaving the keyboard.</p>
       <div class="install">
@@ -345,7 +345,7 @@ footer.wrap {
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
-<span style="color:#928374">╰</span><span style="color:#928374">─────────────────────────</span><span style="color:#928374">─╯</span><span style="color:#b16286">╰</span><span style="color:#b16286">─</span> <span style="color:#98971a">✓ </span>6 rows<span style="color:#938a74"> · 1 ms</span> <span style="color:#b16286">─────────────────────────────</span> <span style="color:#938a74">2/6 · city text</span>  ⏎<span style="color:#938a74"> open</span><span style="color:#938a74"> · </span>y<span style="color:#938a74"> copy</span> <span style="color:#b16286">─╯</span><!-- /screen:terminal --></pre>
+<span style="color:#928374">╰</span><span style="color:#928374">─────────────────────────</span><span style="color:#928374">─╯</span><span style="color:#b16286">╰</span><span style="color:#b16286">─</span> <span style="color:#98971a">✓ </span>6 rows<span style="color:#938a74"> · &lt;1 ms</span> <span style="color:#b16286">────────────────────────────</span> <span style="color:#938a74">2/6 · city text</span>  ⏎<span style="color:#938a74"> open</span><span style="color:#938a74"> · </span>y<span style="color:#938a74"> copy</span> <span style="color:#b16286">─╯</span><!-- /screen:terminal --></pre>
   </div>
   <div class="wrap themes">
     <fieldset>
@@ -407,7 +407,7 @@ footer.wrap {
       <div>
         <dt>Read-only connections</dt>
         <dd>Mark a connection read-only and writes are refused: by the server
-          on PostgreSQL, by the engine on SQLite, by rimor on SQL Server.</dd>
+          on PostgreSQL and MySQL, by the engine on SQLite, by rimor on SQL Server.</dd>
       </div>
       <div>
         <dt>Editor</dt>

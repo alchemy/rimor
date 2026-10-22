@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	mssql "github.com/microsoft/go-mssqldb"
 )
@@ -29,9 +31,17 @@ func ParseTarget(arg string) (Config, error) {
 		return target(Postgres, arg)
 	case "sqlserver":
 		return target(SQLServer, arg)
+	case "mysql", "mariadb":
+		return target(MySQL, arg)
 	}
 	if isURL {
-		return Config{}, fmt.Errorf("%s:// is not a connection rimor knows: use postgres://, postgresql:// or sqlserver://", scheme)
+		return Config{}, fmt.Errorf("%s:// is not a connection rimor knows: use postgres://, postgresql://, sqlserver:// or mysql://", scheme)
+	}
+	// MySQL's driver form names its protocol: user@tcp(host:3306)/db.
+	if strings.Contains(arg, "tcp(") || strings.Contains(arg, "unix(") {
+		if _, err := mysqlConfig(arg, ""); err == nil {
+			return target(MySQL, arg)
+		}
 	}
 
 	// key=value forms: libpq's separates with spaces, ADO's with semicolons.
@@ -50,7 +60,7 @@ func ParseTarget(arg string) (Config, error) {
 		return Config{}, fmt.Errorf("%s is a folder, not a database file", arg)
 	case errors.Is(err, fs.ErrNotExist):
 		return Config{}, fmt.Errorf("%s: no such file, and not a connection string "+
-			"(postgres://…, sqlserver://…, host=… dbname=…, server=…;database=…)", arg)
+			"(postgres://…, sqlserver://…, mysql://…, host=… dbname=…, server=…;database=…, user@tcp(host)/db)", arg)
 	case err != nil:
 		return Config{}, err
 	}
@@ -86,6 +96,17 @@ func target(d Driver, dsn string) (Config, error) {
 }
 
 func targetParts(d Driver, dsn string) (host, database string) {
+	if d == MySQL {
+		cfg, err := mysqlConfig(dsn, "")
+		if err != nil {
+			return "", ""
+		}
+		host = cfg.Addr
+		if h, _, err := net.SplitHostPort(cfg.Addr); err == nil {
+			host = h
+		}
+		return host, cfg.DBName
+	}
 	if u, ok := dsnURL(dsn); ok {
 		host = u.Hostname()
 		if q := u.Query(); q.Get("host") != "" && host == "" {
@@ -141,6 +162,10 @@ func IsAuthError(err error) bool {
 	var ms mssql.Error
 	if errors.As(err, &ms) {
 		return ms.Number == 18456
+	}
+	var my *mysql.MySQLError
+	if errors.As(err, &my) {
+		return my.Number == 1045 // access denied
 	}
 	if err == nil {
 		return false

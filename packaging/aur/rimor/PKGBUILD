@@ -5,7 +5,7 @@
 pkgname=rimor
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Terminal workbench for PostgreSQL, SQL Server and SQLite'
+pkgdesc='Terminal workbench for PostgreSQL, MySQL, SQL Server and SQLite'
 arch=('x86_64' 'aarch64')
 url='https://rimor.dev'
 license=('MIT')

@@ -4,7 +4,7 @@
 
 A terminal workbench for relational databases: browse the catalog, write SQL
 in tabs with syntax highlighting, and explore results in a scrollable grid.
-It supports **PostgreSQL**, **SQL Server** and **SQLite**.
+It supports **PostgreSQL**, **MySQL** and **MariaDB**, **SQL Server** and **SQLite**.
 
 ```
 ╭─ 1  Explorer ─────────╮╭─ 2  ○ untitled-1 ─ ● untitled-2 ● ──────────────────────────────────────╮
@@ -51,8 +51,8 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   of the item selected in the explorer, and `ctrl+e` changes it. Tabs save
   to `.sql` files, and the session (tabs, unsaved text, contexts, layout)
   comes back on the next start.
-- **Editor.** Syntax highlighting for each dialect (PostgreSQL, T-SQL,
-  SQLite), selection, undo/redo, clipboard, and indentation that follows
+- **Editor.** Syntax highlighting for each dialect (PostgreSQL, MySQL,
+  T-SQL, SQLite), selection, undo/redo, clipboard, and indentation that follows
   the previous line.
 - **Results.** Rows stream in the background: the first ones show within
   milliseconds while the rest arrive, with a live count, and `esc` stops
@@ -73,8 +73,8 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   run, changes only that row, and refuses if the row changed since it was
   loaded.
 - **Read-only connections.** A connection can be marked read-only: the
-  server (PostgreSQL) or the engine (SQLite) refuses writes, and on SQL Server
-  rimor refuses statements that write.
+  server (PostgreSQL, MySQL) or the engine (SQLite) refuses writes, and on
+  SQL Server rimor refuses statements that write.
 - **Sessions per tab.** Each tab runs on its own connection, so `USE`, `SET`,
   temp tables and open transactions carry over between runs. A tab inside a
   transaction says so in its status line (`in transaction`, or `failed
@@ -172,7 +172,9 @@ request.
 Editing needs a result from a single table that includes the table's
 primary key, or a unique key on non-null columns; on SQLite, a table
 without one can be edited through its `rowid` (`SELECT rowid, …`). Key columns and
-columns the database computes are not editable. The update only applies if
+columns the database computes are not editable. Editing MySQL and MariaDB
+results is not available yet: their driver does not say which table and
+column each result column comes from, which editing needs to be safe. The update only applies if
 the cell still holds the value it was opened with; otherwise rimor says the
 row changed and leaves it alone. It runs on the tab's connection, so inside
 an open transaction it can still be rolled back.
@@ -188,11 +190,17 @@ connection.
 | PostgreSQL | `postgres://user:pass@localhost:5432/db?sslmode=disable` |
 | SQL Server | `sqlserver://user:pass@localhost:1433?database=db` |
 | SQLite | `/path/to/database.db` |
+| MySQL, MariaDB | `mysql://user:pass@localhost:3306/db`, or the driver's own `user:pass@tcp(localhost:3306)/db` |
 
 Characters with a special meaning in URLs must be percent-encoded in
 passwords (`@` is `%40`). For SQL Server, the URL path names an *instance*,
 not a database; the database goes in `?database=`. Add
 `&TrustServerCertificate=true` for servers with self-signed certificates.
+For MySQL and MariaDB, the options after `?` are
+[go-sql-driver/mysql's](https://github.com/go-sql-driver/mysql#parameters)
+(`tls=true`, `timeout=5s`); a MySQL database is what other engines call a
+schema, so the explorer lists each database's tables, views, routines and
+triggers directly.
 
 Passwords are kept in the system keychain: Keychain on macOS, Credential
 Manager on Windows, the Secret Service (GNOME Keyring, KWallet) on Linux.
@@ -209,8 +217,8 @@ connection string without a password also works, when the driver finds one
 elsewhere: `~/.pgpass` or `PGPASSWORD` for PostgreSQL, Windows authentication
 for SQL Server.
 
-Mark a connection **read-only** in the same form. On PostgreSQL the server
-then refuses writes, and on SQLite the engine does. SQL Server has no
+Mark a connection **read-only** in the same form. On PostgreSQL and MySQL
+the server then refuses writes, DDL included, and on SQLite the engine does. SQL Server has no
 read-only session setting, so rimor refuses statements that write, `EXEC`
 included; for a hard guarantee, use a login without write permissions.
 
@@ -224,10 +232,12 @@ rimor ./app.db
 rimor postgres://me@db.local/erp
 rimor -readonly sqlserver://sa@sql.local?database=erp
 rimor "host=db.local dbname=erp user=me"
+rimor mysql://me@db.local/shop
 ```
 
-rimor recognises PostgreSQL and SQL Server connection strings, in URL or
-key=value form, and SQLite files, which must exist. The connection comes
+rimor recognises PostgreSQL, SQL Server and MySQL connection strings, in
+URL form or the driver's own (key=value, or `user@tcp(host)/db`), and SQLite
+files, which must exist. The connection comes
 first in the explorer, marked *temporary*, with a tab open on it; your saved
 connections are there too. Nothing about it is saved: not in
 `connections.json`, not in the keychain, and your session is neither
@@ -430,9 +440,15 @@ results) are not remappable yet.
   statement never runs twice to find out. SQL Server batches are not
   classified: the server reports what they produce, so `DECLARE …; SELECT …`
   shows its rows and a batch that only writes shows the rows affected.
+  MySQL batches are not classified either: the first result with columns is
+  shown (`SET @x := 1; SELECT …` included), else the rows the last statement
+  affected.
 - On PostgreSQL a row-returning query must be a single statement; select it
   to run one of several. SQL Server batches return all their results.
 - Only the first result of a SQL Server batch can be edited.
+- MySQL and MariaDB results cannot be edited yet (see
+  [Editing data](#editing-data)). The explorer does not list MySQL events or
+  MariaDB sequences.
 - A result's rows stay in memory, up to `result_memory_mb` (512 MB by
   default, shared by all the results of a batch); fetching stops there and
   keeps what arrived, and a batch says it was not read to its end. Spilling larger
@@ -478,12 +494,20 @@ is given:
 RIMOR_TEST_POSTGRES='postgres://postgres@localhost:5432/postgres?sslmode=disable' \
 RIMOR_TEST_POSTGRES_DB=warehouse \
 RIMOR_TEST_SQLSERVER='sqlserver://user:pass@host?database=db&TrustServerCertificate=true' \
+RIMOR_TEST_MYSQL='root:pass@tcp(127.0.0.1:33306)/rimor_test' \
+RIMOR_TEST_MARIADB='root:pass@tcp(127.0.0.1:33307)/rimor_test' \
 go test ./...
 ```
 
 `RIMOR_TEST_POSTGRES_DB` names a second database on the same server, for the
 tests that switch databases. The SQL Server tests only read data and use temp
-tables.
+tables. The MySQL and MariaDB tests create and drop databases named
+`rimor_*`; throwaway servers will do:
+
+```sh
+docker run -d --name rimor-mysql -e MYSQL_ROOT_PASSWORD=pass -e MYSQL_DATABASE=rimor_test -p 127.0.0.1:33306:3306 mysql:8.4
+docker run -d --name rimor-mariadb -e MARIADB_ROOT_PASSWORD=pass -e MARIADB_DATABASE=rimor_test -p 127.0.0.1:33307:3306 mariadb:11
+```
 
 | Package | Contents |
 |---|---|

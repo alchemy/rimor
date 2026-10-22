@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -251,6 +252,17 @@ func listObjects(ctx context.Context, pool *db.Pool, a agentArgs) (any, error) {
 		}
 		version, _ := pool.ServerVersion(ctx)
 		return map[string]any{"server_version": version, "databases": out}, nil
+	}
+
+	// A MySQL database is a schema: its objects come next.
+	if pool.Config().Driver == db.MySQL {
+		name := cmp.Or(a.Database, a.Schema)
+		parent := db.Object{Kind: db.KindDatabase, Name: name, Database: name, Schema: name}
+		folders, err := pool.Children(ctx, &parent)
+		if err != nil {
+			return nil, err
+		}
+		return objectsByKind(ctx, pool, folders, a.Kind)
 	}
 
 	if a.Schema == "" {

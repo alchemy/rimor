@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/jackc/pgx/v5/stdlib"
@@ -75,9 +76,57 @@ func Transaction(ctx context.Context, s *sql.Conn, d Driver) (TxState, error) {
 		}
 		_, err := s.ExecContext(ctx, "ROLLBACK")
 		return TxState{}, err
+
+	case MySQL:
+		return mysqlTransaction(ctx, s)
 	}
 	return TxState{}, fmt.Errorf("transactions: unknown driver %q", d)
 }
+
+// mysqlTransaction reads the in-transaction flag the server sends with
+// every reply (SERVER_STATUS_IN_TRANS), which the driver keeps in an
+// unexported field. There is no safe question to ask in SQL: MySQL has no
+// @@in_transaction, and a BEGIN inside a transaction commits it. If a
+// driver update renames the field, TestTransactionsMySQL fails, and
+// MariaDB's @@in_transaction still answers meanwhile.
+func mysqlTransaction(ctx context.Context, s *sql.Conn) (TxState, error) {
+	var status uint64
+	found := false
+	err := s.Raw(func(dc any) error {
+		v := reflect.ValueOf(dc)
+		if v.Kind() == reflect.Pointer {
+			v = v.Elem()
+		}
+		if v.Kind() != reflect.Struct {
+			return nil
+		}
+		if f := v.FieldByName("status"); f.IsValid() && f.CanUint() {
+			status, found = f.Uint(), true
+		}
+		return nil
+	})
+	if err != nil {
+		return TxState{}, err
+	}
+	if found {
+		if status&mysqlStatusInTrans != 0 {
+			return TxState{Open: true, Levels: 1}, nil
+		}
+		return TxState{}, nil
+	}
+	var in int
+	if err := s.QueryRowContext(ctx, "SELECT @@in_transaction").Scan(&in); err != nil {
+		return TxState{}, fmt.Errorf("cannot tell whether a transaction is open: %w", err)
+	}
+	if in != 0 {
+		return TxState{Open: true, Levels: 1}, nil
+	}
+	return TxState{}, nil
+}
+
+// mysqlStatusInTrans is SERVER_STATUS_IN_TRANS of the client/server
+// protocol.
+const mysqlStatusInTrans = 1
 
 // ErrTxFailed refuses to commit a transaction that can only be rolled back.
 var ErrTxFailed = errors.New("the transaction failed: it can only be rolled back")

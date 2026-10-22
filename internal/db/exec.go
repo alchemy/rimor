@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	mssql "github.com/microsoft/go-mssqldb"
 )
@@ -68,6 +69,7 @@ func CloseSession(s *sql.Conn) {
 // gone and the statement never ran, so a fresh session may retry it.
 func IsConnLost(err error) bool {
 	return errors.Is(err, sql.ErrConnDone) || errors.Is(err, driver.ErrBadConn) ||
+		errors.Is(err, mysql.ErrInvalidConn) ||
 		(err != nil && strings.Contains(err.Error(), "database is closed"))
 }
 
@@ -231,6 +233,16 @@ func Run(ctx context.Context, conn *sql.Conn, query string, opts RunOptions) (*R
 	}
 
 	start := time.Now()
+	if opts.Driver == MySQL {
+		res, err := runMySQL(ctx, conn, query, opts)
+		if res != nil {
+			res.Duration = time.Since(start)
+		}
+		if res == nil || res.Rows == nil {
+			opts.Cancel()
+		}
+		return res, err
+	}
 	if opts.Driver == SQLServer {
 		res, err := runMSSQL(ctx, conn, query, opts)
 		if res != nil {
@@ -302,11 +314,23 @@ func newRowSet(types []*sql.ColumnType, opts RunOptions) *RowSet {
 }
 
 func numericType(name string) bool {
-	switch strings.ToUpper(name) {
-	case "INT", "INT2", "INT4", "INT8", "INTEGER", "BIGINT", "SMALLINT", "TINYINT",
+	// MySQL names unsigned columns "UNSIGNED INT" and the like.
+	switch strings.TrimPrefix(strings.ToUpper(name), "UNSIGNED ") {
+	case "INT", "INT2", "INT4", "INT8", "INTEGER", "BIGINT", "SMALLINT", "TINYINT", "MEDIUMINT",
 		"NUMERIC", "DECIMAL", "FLOAT", "FLOAT4", "FLOAT8", "REAL", "DOUBLE",
-		"MONEY", "SMALLMONEY", "OID":
+		"MONEY", "SMALLMONEY", "OID", "BIT":
 		return true
+	}
+	return false
+}
+
+// hasControl reports bytes that are no text: control characters other than
+// tab and line breaks, as in binary values that happen to be valid UTF-8.
+func hasControl(b []byte) bool {
+	for _, c := range b {
+		if c < 0x20 && c != '\t' && c != '\n' && c != '\r' || c == 0x7f {
+			return true
+		}
 	}
 	return false
 }
@@ -316,13 +340,21 @@ func formatValue(v any, typ string) Value {
 	case nil:
 		return Value{Text: "NULL", Null: true}
 	case []byte:
+		// MySQL sends BIT values as bytes, most significant first.
+		if strings.EqualFold(typ, "BIT") && len(v) <= 8 {
+			var n uint64
+			for _, b := range v {
+				n = n<<8 | uint64(b)
+			}
+			return Value{Text: strconv.FormatUint(n, 10)}
+		}
 		if strings.EqualFold(typ, "UNIQUEIDENTIFIER") && len(v) == 16 {
 			var u mssql.UniqueIdentifier
 			if u.Scan(v) == nil {
 				return Value{Text: u.String()}
 			}
 		}
-		if utf8.Valid(v) {
+		if utf8.Valid(v) && !hasControl(v) {
 			return Value{Text: string(v)}
 		}
 		const show = 32
@@ -383,6 +415,18 @@ func Describe(err error) Error {
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
 		return Error{Message: pg.Message, Code: pg.Code, Detail: pg.Detail, Hint: pg.Hint, Position: int(pg.Position)}
+	}
+	var my *mysql.MySQLError
+	if errors.As(err, &my) {
+		e := Error{Message: my.Message, Code: strconv.Itoa(int(my.Number))}
+		if my.SQLState != [5]byte{} {
+			e.Detail = "SQLSTATE " + string(my.SQLState[:])
+		}
+		// "… near 'FORM t' at line 2": the line, for the caret.
+		if m := mysqlLine.FindStringSubmatch(my.Message); m != nil {
+			e.Line, _ = strconv.Atoi(m[1])
+		}
+		return e
 	}
 	var ms mssql.Error
 	if errors.As(err, &ms) {

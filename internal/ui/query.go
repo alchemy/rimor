@@ -33,6 +33,8 @@ func (c queryContext) language() editor.Language {
 		return editor.PostgreSQL
 	case db.SQLServer:
 		return editor.TSQL
+	case db.MySQL:
+		return editor.MySQL
 	}
 	return editor.SQL
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	mssql "github.com/microsoft/go-mssqldb"
 )
@@ -31,6 +32,10 @@ func TestParseTarget(t *testing.T) {
 		{"sqlserver://sa@sql.local/SQLEXPRESS?database=erp", SQLServer, `sql.local\SQLEXPRESS › erp`},
 		{"server=sql.local;user id=sa;database=erp", SQLServer, "sql.local › erp"},
 		{"Data Source=sql.local;Initial Catalog=erp", SQLServer, "sql.local › erp"},
+		{"mysql://me@db.local:3306/shop", MySQL, "db.local › shop"},
+		{"mariadb://me:secret@db.local/shop", MySQL, "db.local › shop"},
+		{"me:secret@tcp(db.local:3306)/shop?parseTime=true", MySQL, "db.local › shop"},
+		{"me@unix(/run/mysqld/mysqld.sock)/shop", MySQL, "/run/mysqld/mysqld.sock › shop"},
 		{file, SQLite, "app.db"},
 	} {
 		cfg, err := ParseTarget(c.arg)
@@ -57,7 +62,7 @@ func TestParseTarget(t *testing.T) {
 		t.Errorf("relative path: %q is not %q", cfg.DSN, file)
 	}
 
-	for _, arg := range []string{"", "mysql://me@host/db", filepath.Join(dir, "typo.db"), dir} {
+	for _, arg := range []string{"", "oracle://me@host/db", filepath.Join(dir, "typo.db"), dir} {
 		if cfg, err := ParseTarget(arg); err == nil {
 			t.Errorf("%q accepted: %+v", arg, cfg)
 		}
@@ -69,12 +74,13 @@ func TestIsAuthError(t *testing.T) {
 		&pgconn.PgError{Code: "28P01", Message: "password authentication failed for user \"me\""},
 		mssql.Error{Number: 18456, Message: "Login failed for user 'sa'."},
 		errors.New("failed to connect to `user=me database=erp`: failed SASL auth: no password"),
+		&mysql.MySQLError{Number: 1045, Message: "Access denied for user 'me'@'localhost' (using password: NO)"},
 	} {
 		if !IsAuthError(err) {
 			t.Errorf("not an auth error: %v", err)
 		}
 	}
-	for _, err := range []error{nil, errors.New("dial tcp: connection refused"), &pgconn.PgError{Code: "3D000"}} {
+	for _, err := range []error{nil, errors.New("dial tcp: connection refused"), &pgconn.PgError{Code: "3D000"}, &mysql.MySQLError{Number: 1049}} {
 		if IsAuthError(err) {
 			t.Errorf("an auth error: %v", err)
 		}

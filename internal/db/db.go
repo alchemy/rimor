@@ -24,10 +24,11 @@ const (
 	Postgres  Driver = "postgres"
 	SQLite    Driver = "sqlite"
 	SQLServer Driver = "sqlserver"
+	MySQL     Driver = "mysql" // and MariaDB
 )
 
 // Drivers lists the supported engines in display order.
-var Drivers = []Driver{Postgres, SQLite, SQLServer}
+var Drivers = []Driver{Postgres, SQLite, SQLServer, MySQL}
 
 func (d Driver) Label() string {
 	switch d {
@@ -37,6 +38,8 @@ func (d Driver) Label() string {
 		return "SQLite"
 	case SQLServer:
 		return "SQL Server"
+	case MySQL:
+		return "MySQL"
 	}
 	return string(d)
 }
@@ -50,6 +53,8 @@ func (d Driver) Short() string {
 		return "sqlite"
 	case SQLServer:
 		return "mssql"
+	case MySQL:
+		return "mysql"
 	}
 	return string(d)
 }
@@ -63,6 +68,8 @@ func (d Driver) DSNHint() string {
 		return "/path/to/database.db"
 	case SQLServer:
 		return "sqlserver://user:pass@localhost:1433?database=db"
+	case MySQL:
+		return "mysql://user:pass@localhost:3306/db"
 	}
 	return ""
 }
@@ -75,6 +82,8 @@ func (d Driver) sqlName() string {
 		return "sqlite"
 	case SQLServer:
 		return "sqlserver"
+	case MySQL:
+		return "mysql"
 	}
 	return string(d)
 }
@@ -85,7 +94,8 @@ type Config struct {
 	Driver Driver `json:"driver"`
 	DSN    string `json:"dsn"`
 	// ReadOnly refuses writes: enforced by the server on PostgreSQL
-	// (default_transaction_read_only) and by the engine on SQLite
+	// (default_transaction_read_only) and MySQL (SET SESSION TRANSACTION
+	// READ ONLY), and by the engine on SQLite
 	// (query_only); on SQL Server, which has no such session setting,
 	// rimor refuses statements that write (see CheckReadOnly).
 	ReadOnly bool `json:"read_only,omitempty"`
@@ -144,6 +154,11 @@ func OpenDatabase(ctx context.Context, cfg Config, database string) (*sql.DB, er
 			if dsn, err = mssqlWithDatabase(dsn, database); err != nil {
 				return nil, err
 			}
+		}
+	case MySQL:
+		var err error
+		if conn, err = openMySQL(cfg, database); err != nil {
+			return nil, err
 		}
 	}
 	if conn == nil {
@@ -237,6 +252,8 @@ func IntrospectorFor(d Driver) Introspector {
 		return sqlite{}
 	case SQLServer:
 		return sqlserver{}
+	case MySQL:
+		return mysqlCatalog{}
 	}
 	return nil
 }

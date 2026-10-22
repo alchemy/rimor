@@ -149,6 +149,8 @@ func driverColor(d db.Driver) *color.Color {
 		return &colorTeal
 	case db.SQLServer:
 		return &colorPeach
+	case db.MySQL:
+		return &colorSapphire
 	}
 	return &colorTitle
 }

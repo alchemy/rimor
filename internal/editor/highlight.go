@@ -74,6 +74,7 @@ const (
 	SQL        Language = "sql"
 	PostgreSQL Language = "postgres"
 	TSQL       Language = "tsql"
+	MySQL      Language = "mysql"
 	JSON       Language = "json"
 )
 

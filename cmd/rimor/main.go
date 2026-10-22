@@ -145,6 +145,7 @@ func main() {
 			"TARGET is a connection string or an SQLite file:\n"+
 			"  postgres://user@host/db   host=… dbname=… user=…\n"+
 			"  sqlserver://user@host?database=db   server=…;database=…;user id=…\n"+
+			"  mysql://user@host/db      user@tcp(host:3306)/db\n"+
 			"  ./app.db\n"+
 			"Leave the password out: rimor asks for it, and keeps it in memory only.\n", Version())
 	}

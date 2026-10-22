@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,8 +49,8 @@ func TestReleaseClosesTheConnection(t *testing.T) {
 	for _, c := range []struct {
 		env    string
 		driver Driver
-	}{{"RIMOR_TEST_POSTGRES", Postgres}, {"RIMOR_TEST_SQLSERVER", SQLServer}} {
-		t.Run(string(c.driver), func(t *testing.T) {
+	}{{"RIMOR_TEST_POSTGRES", Postgres}, {"RIMOR_TEST_SQLSERVER", SQLServer}, {"RIMOR_TEST_MYSQL", MySQL}, {"RIMOR_TEST_MARIADB", MySQL}} {
+		t.Run(strings.ToLower(strings.TrimPrefix(c.env, "RIMOR_TEST_")), func(t *testing.T) {
 			p := NewPool(Config{Driver: c.driver, DSN: serverDSN(t, c.env)})
 			defer p.Close()
 			released(t, p)

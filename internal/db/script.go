@@ -29,7 +29,7 @@ func HasScripts(d Driver, o Object) bool {
 	case KindTable, KindView, KindMatView, KindColumn, KindForeignKey, KindFunction, KindProcedure, KindSequence:
 		return o.Kind != KindColumn || o.Table != ""
 	case KindIndex:
-		return !o.Primary && (d != SQLServer || o.Table != "")
+		return !o.Primary && ((d != SQLServer && d != MySQL) || o.Table != "")
 	}
 	return false
 }
@@ -77,7 +77,7 @@ func (p *Pool) Scripts(ctx context.Context, o Object, rows int) ([]Script, error
 	case KindIndex:
 		drop := "DROP INDEX " + q.qualified(o.Schema, o.Name)
 		switch d {
-		case SQLServer:
+		case SQLServer, MySQL:
 			drop = "DROP INDEX " + q.ident(o.Name) + " ON " + q.qualified(o.Schema, o.Table)
 		case SQLite:
 			drop = "DROP INDEX " + q.ident(o.Name)
@@ -179,8 +179,10 @@ func callScripts(q quoter, o Object, r *Routine) []Script {
 	switch {
 	case q.d == SQLServer && r.Kind == "procedure":
 		sql = mssqlExec(q, name, r.Params)
-	case q.d == SQLServer && r.Kind == "scalar function":
+	case r.Kind == "scalar function":
 		sql = "SELECT " + name + q.args(r.Params) + ";\n"
+	case q.d == MySQL && r.Kind == "procedure":
+		sql = mysqlCall(q, name, r.Params)
 	case r.Kind == "procedure":
 		sql = "CALL " + name + q.args(r.Params) + ";\n"
 	default:
@@ -227,6 +229,32 @@ func mssqlExec(q quoter, name string, params []Param) string {
 	return b.String()
 }
 
+// mysqlCall calls a procedure, its OUT and INOUT parameters in user
+// variables named after them, selected afterwards.
+func mysqlCall(q quoter, name string, params []Param) string {
+	if len(params) == 0 {
+		return "CALL " + name + "();\n"
+	}
+	var b strings.Builder
+	var outs []string
+	values := make([]string, len(params))
+	notes := make([]string, len(params))
+	for i, p := range params {
+		values[i] = "NULL"
+		notes[i] = strings.TrimSpace(p.Name + " " + p.Type)
+		if p.Output {
+			values[i] = "@" + p.Name
+			outs = append(outs, values[i])
+			notes[i] += ", output"
+		}
+	}
+	b.WriteString("CALL " + name + "(\n" + argLines(values, notes) + ");\n")
+	if len(outs) > 0 {
+		fmt.Fprintf(&b, "SELECT %s;\n", strings.Join(outs, ", "))
+	}
+	return b.String()
+}
+
 // dropScript writes a DROP commented out, so that running the tab as it is
 // drops nothing.
 func dropScript(what, statement string) Script {
@@ -256,11 +284,16 @@ func (q quoter) ident(name string) string {
 	if q.d == Postgres && strings.ToLower(name) != name {
 		plain = false
 	}
+	if q.d == MySQL && mysqlReserved[strings.ToUpper(name)] {
+		plain = false
+	}
 	switch {
 	case plain:
 		return name
 	case q.d == SQLServer:
 		return "[" + strings.ReplaceAll(name, "]", "]]") + "]"
+	case q.d == MySQL:
+		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 	}
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
@@ -340,6 +373,8 @@ func (q quoter) where(key []TableColumn) string {
 
 func (q quoter) addColumn(table string) string {
 	switch q.d {
+	case MySQL:
+		return "ALTER TABLE " + table + "\nADD COLUMN new_column varchar(100) NULL;\n"
 	case SQLServer:
 		return "ALTER TABLE " + table + "\nADD new_column nvarchar(100) NULL;\n"
 	case SQLite:
@@ -363,16 +398,24 @@ func (q quoter) args(params []Param) string {
 			notes[i] += ", output"
 		}
 	}
+	return "(\n" + argLines(values, notes) + ")"
+}
+
+// argLines writes one argument per line, its comment aligned with the
+// others'.
+func argLines(values, notes []string) string {
+	width := 0
+	for _, v := range values {
+		width = max(width, len(v)+1)
+	}
 	var b strings.Builder
-	b.WriteString("(\n")
-	for i := range values {
+	for i, v := range values {
 		sep := ","
 		if i == len(values)-1 {
-			sep = " "
+			sep = ""
 		}
-		fmt.Fprintf(&b, "    %s%s -- %s\n", values[i], sep, notes[i])
+		fmt.Fprintf(&b, "    %s%s%s -- %s\n", v, sep, strings.Repeat(" ", width-len(v)-len(sep)), notes[i])
 	}
-	b.WriteString(")")
 	return b.String()
 }
 
@@ -423,6 +466,19 @@ func wrapList(items []string, indent, width int) string {
 	}
 	return b.String()
 }
+
+// mysqlReserved are MySQL's reserved words that the shared list lacks.
+var mysqlReserved = func() map[string]bool {
+	m := map[string]bool{}
+	for w := range strings.FieldsSeq(`
+		ACCESSIBLE CHANGE CONDITION DAY_HOUR DIV DUAL FULLTEXT GROUPS HIGH_PRIORITY INTERVAL KEYS KILL
+		LEAVE LINES LOAD LOCK LOOP LOW_PRIORITY MATCH MOD OPTIMIZE OPTION OUTFILE PARTITION PURGE RANGE
+		RANK READ RELEASE RENAME REPEAT REPLACE REQUIRE RESIGNAL ROW ROWS SCHEMAS SEPARATOR SIGNAL SPATIAL
+		SQL STARTING STRAIGHT_JOIN TERMINATED UNDO UNLOCK UNSIGNED USAGE UTC_DATE WRITE XOR YEAR_MONTH ZEROFILL`) {
+		m[w] = true
+	}
+	return m
+}()
 
 // reserved words are quoted when used as names. The list covers the words
 // the three dialects reserve that are likely as table or column names;
