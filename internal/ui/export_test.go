@@ -72,8 +72,12 @@ func TestExportToFiles(t *testing.T) {
 	d.runSQL("SELECT id, name, note FROM customers ORDER BY id")
 	d.key("alt+3", "e")
 	ed := d.exportDialog()
-	if ed.format != export.CSV || ed.sep != ';' && export.ListSeparator() == ';' {
+	if ed.format != export.CSV || ed.sep != export.ListSeparator() {
 		t.Fatalf("defaults: format %v, separator %q", ed.format, ed.sep)
+	}
+	// On Windows the region settings decide, not LC_ALL: start from ';'.
+	if ed.sep != ';' {
+		d.key("down", "right", "up")
 	}
 	screen := d.screen()
 	for _, w := range []string{"Export", "3 rows, 3 columns", "Format", "CSV", "Separator", "; semicolon", "NULL as", "File"} {
