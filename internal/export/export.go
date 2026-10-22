@@ -59,7 +59,8 @@ type Options struct {
 	Decimal rune
 	Null    string // how CSV and TSV write NULL: "", "NULL" or `\N`
 	BOM     bool   // CSV: start with a UTF-8 byte order mark, for Excel
-	// SQL: the table to insert into, quoted and qualified, and the dialect.
+	// SQL: the table to insert into, quoted and qualified ("result" when
+	// empty), and the dialect.
 	Table  string
 	Driver db.Driver
 }
@@ -90,13 +91,97 @@ func New(w io.Writer, o Options, cols []db.ExportColumn) (Writer, error) {
 	return nil, fmt.Errorf("export: unknown format %d", o.Format)
 }
 
+// ── Columns and values ──────────────────────────────────────────────────────
+
+// column is what the writers need of a column, worked out once.
+type column struct {
+	numeric, boolean, json bool
+}
+
+func columnsOf(cols []db.ExportColumn) []column {
+	out := make([]column, len(cols))
+	for i, c := range cols {
+		t := strings.ToUpper(c.Type)
+		out[i] = column{
+			numeric: c.Numeric,
+			boolean: t == "BOOL" || t == "BOOLEAN" || t == "BIT",
+			json:    t == "JSON" || t == "JSONB",
+		}
+	}
+	return out
+}
+
+// kind is what a value is written as in JSON and SQL.
+type kind int
+
+const (
+	kindText kind = iota
+	kindNull
+	kindNumber  // a number of a numeric column, written as it is
+	kindBoolean // true or false of a boolean column
+	kindJSON    // the content of a JSON column
+)
+
+func (c column) kind(v db.Value) kind {
+	switch {
+	case v.Null:
+		return kindNull
+	case c.numeric && isNumber(v.Text):
+		return kindNumber
+	case c.boolean && (v.Text == "true" || v.Text == "false"):
+		return kindBoolean
+	case c.json:
+		return kindJSON
+	}
+	return kindText
+}
+
+// isNumber reports text in JSON's number syntax, which SQL takes as it is
+// too: no 1., .5, +1, NaN, Inf, or leading zeros (007 would lose them).
+func isNumber(s string) bool {
+	i := 0
+	digits := func() int {
+		start := i
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		return i - start
+	}
+	if i < len(s) && s[i] == '-' {
+		i++
+	}
+	switch {
+	case i < len(s) && s[i] == '0':
+		i++
+	case digits() == 0:
+		return false
+	}
+	if i < len(s) && s[i] == '.' {
+		i++
+		if digits() == 0 {
+			return false
+		}
+	}
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			i++
+		}
+		if digits() == 0 {
+			return false
+		}
+	}
+	return i == len(s)
+}
+
 // ── CSV and TSV ─────────────────────────────────────────────────────────────
 
 type csvWriter struct {
-	w       *csv.Writer
-	null    string
-	rec     []string
-	numeric []bool // columns whose decimals take the comma
+	w     *csv.Writer
+	null  string
+	rec   []string
+	cols  []column
+	comma bool // numeric columns write decimals with a comma
 }
 
 func newCSV(w io.Writer, o Options, cols []db.ExportColumn) (*csvWriter, error) {
@@ -122,14 +207,7 @@ func newCSV(w io.Writer, o Options, cols []db.ExportColumn) (*csvWriter, error) 
 	if err := cw.Write(header); err != nil {
 		return nil, err
 	}
-	c := &csvWriter{w: cw, null: o.Null, rec: make([]string, len(cols))}
-	if DecimalComma(o) {
-		c.numeric = make([]bool, len(cols))
-		for i, col := range cols {
-			c.numeric[i] = col.Numeric
-		}
-	}
-	return c, nil
+	return &csvWriter{w: cw, null: o.Null, rec: make([]string, len(cols)), cols: columnsOf(cols), comma: DecimalComma(o)}, nil
 }
 
 // DecimalComma reports whether an export writes decimals with a comma: a
@@ -145,7 +223,7 @@ func (c *csvWriter) Row(values []db.Value) error {
 		switch {
 		case v.Null:
 			c.rec[i] = c.null
-		case c.numeric != nil && c.numeric[i] && isNumber(v.Text):
+		case c.comma && c.cols[i].numeric && isNumber(v.Text):
 			// Only numbers of numeric columns: a code or a version in a
 			// text column keeps its dots.
 			c.rec[i] = strings.Replace(v.Text, ".", ",", 1)
@@ -163,15 +241,18 @@ func (c *csvWriter) Close() error {
 
 type jsonWriter struct {
 	w     io.Writer
-	cols  []db.ExportColumn
+	cols  []column
 	keys  []string // the column names as JSON keys, made unique
 	lines bool
 	n     int
-	buf   strings.Builder
+	buf   bytes.Buffer // a row, its capacity kept between rows
+	enc   *json.Encoder
 }
 
 func newJSON(w io.Writer, o Options, cols []db.ExportColumn) (*jsonWriter, error) {
-	j := &jsonWriter{w: w, cols: cols, lines: o.Format == JSONLines}
+	j := &jsonWriter{w: w, cols: columnsOf(cols), lines: o.Format == JSONLines}
+	j.enc = json.NewEncoder(&j.buf)
+	j.enc.SetEscapeHTML(false)
 	seen := map[string]int{}
 	for _, c := range cols {
 		name := c.Name
@@ -206,15 +287,38 @@ func (j *jsonWriter) Row(values []db.Value) error {
 		}
 		b.WriteString(j.keys[i])
 		b.WriteString(": ")
-		b.WriteString(jsonValue(v, j.cols[i]))
+		j.value(v, j.cols[i])
 	}
 	b.WriteByte('}')
 	if j.lines {
 		b.WriteByte('\n')
 	}
 	j.n++
-	_, err := io.WriteString(j.w, b.String())
+	_, err := j.w.Write(b.Bytes())
 	return err
+}
+
+// value writes a value as JSON: numbers of numeric columns as numbers,
+// booleans as booleans, JSON columns as the JSON they hold, the rest (and
+// JSON columns holding no JSON) as strings.
+func (j *jsonWriter) value(v db.Value, c column) {
+	b := &j.buf
+	switch c.kind(v) {
+	case kindNull:
+		b.WriteString("null")
+		return
+	case kindNumber, kindBoolean:
+		b.WriteString(v.Text)
+		return
+	case kindJSON:
+		n := b.Len()
+		if json.Compact(b, []byte(v.Text)) == nil {
+			return
+		}
+		b.Truncate(n)
+	}
+	j.enc.Encode(v.Text) // a quoted string, and a line break to take back
+	b.Truncate(b.Len() - 1)
 }
 
 func (j *jsonWriter) Close() error {
@@ -229,65 +333,15 @@ func (j *jsonWriter) Close() error {
 	return err
 }
 
-// jsonValue writes a value as JSON: numbers of numeric columns as numbers,
-// booleans as booleans, JSON columns as the JSON they hold, the rest as
-// strings.
-func jsonValue(v db.Value, c db.ExportColumn) string {
-	switch {
-	case v.Null:
-		return "null"
-	case c.Numeric && isNumber(v.Text):
-		return v.Text
-	case boolType(c.Type) && (v.Text == "true" || v.Text == "false"):
-		return v.Text
-	case jsonType(c.Type) && json.Valid([]byte(v.Text)):
-		var compact bytes.Buffer
-		if err := json.Compact(&compact, []byte(v.Text)); err == nil {
-			return compact.String()
-		}
-	}
-	s, _ := json.Marshal(v.Text)
-	return string(s)
-}
-
-// isNumber reports text that JSON and SQL take as a number as it is.
-func isNumber(s string) bool {
-	if s == "" {
-		return false
-	}
-	// JSON's number syntax, which SQL takes too: no 1., .5, +1, NaN, Inf
-	// or leading zeros (007 would lose them).
-	if _, err := strconv.ParseFloat(s, 64); err != nil {
-		return false
-	}
-	return json.Valid([]byte(s))
-}
-
-func boolType(t string) bool {
-	switch strings.ToUpper(t) {
-	case "BOOL", "BOOLEAN", "BIT":
-		return true
-	}
-	return false
-}
-
-func jsonType(t string) bool {
-	switch strings.ToUpper(t) {
-	case "JSON", "JSONB":
-		return true
-	}
-	return false
-}
-
 // ── SQL INSERTs ─────────────────────────────────────────────────────────────
 
 type sqlWriter struct {
-	w     io.Writer
-	o     Options
-	cols  []db.ExportColumn
-	head  string // INSERT INTO t (a, b) VALUES
-	inRow int    // rows in the open INSERT
-	buf   strings.Builder
+	w      io.Writer
+	driver db.Driver
+	cols   []column
+	head   string // INSERT INTO t (a, b) VALUES
+	inRow  int    // rows in the open INSERT
+	buf    bytes.Buffer
 }
 
 func newSQL(w io.Writer, o Options, cols []db.ExportColumn) *sqlWriter {
@@ -299,17 +353,16 @@ func newSQL(w io.Writer, o Options, cols []db.ExportColumn) *sqlWriter {
 	if table == "" {
 		table = "result"
 	}
-	return &sqlWriter{w: w, o: o, cols: cols,
+	return &sqlWriter{w: w, driver: o.Driver, cols: columnsOf(cols),
 		head: "INSERT INTO " + table + " (" + strings.Join(names, ", ") + ") VALUES\n"}
 }
 
 func (s *sqlWriter) Row(values []db.Value) error {
 	b := &s.buf
 	b.Reset()
-	switch {
-	case s.inRow == 0:
+	if s.inRow == 0 {
 		b.WriteString(s.head)
-	default:
+	} else {
 		b.WriteString(",\n")
 	}
 	b.WriteString("    (")
@@ -317,15 +370,14 @@ func (s *sqlWriter) Row(values []db.Value) error {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(sqlValue(v, s.cols[i], s.o.Driver))
+		writeSQLValue(b, v, s.cols[i], s.driver)
 	}
 	b.WriteByte(')')
-	s.inRow++
-	if s.inRow == InsertBatch {
+	if s.inRow++; s.inRow == InsertBatch {
 		b.WriteString(";\n")
 		s.inRow = 0
 	}
-	_, err := io.WriteString(s.w, b.String())
+	_, err := s.w.Write(b.Bytes())
 	return err
 }
 
@@ -337,56 +389,81 @@ func (s *sqlWriter) Close() error {
 	return err
 }
 
-// sqlValue writes a value as a literal of the dialect.
-func sqlValue(v db.Value, c db.ExportColumn, d db.Driver) string {
-	switch {
-	case v.Null:
-		return "NULL"
-	case c.Numeric && isNumber(v.Text):
-		return v.Text
-	case boolType(c.Type) && (v.Text == "true" || v.Text == "false"):
-		switch d {
-		case db.SQLServer, db.SQLite:
-			if v.Text == "true" {
-				return "1"
-			}
-			return "0"
+// writeSQLValue writes a value as a literal of the dialect.
+func writeSQLValue(b *bytes.Buffer, v db.Value, c column, d db.Driver) {
+	switch c.kind(v) {
+	case kindNull:
+		b.WriteString("NULL")
+	case kindNumber:
+		b.WriteString(v.Text)
+	case kindBoolean:
+		switch {
+		case d == db.SQLServer || d == db.SQLite:
+			b.WriteByte("01"[b2i(v.Text == "true")])
+		default:
+			b.WriteString(strings.ToUpper(v.Text))
 		}
-		return strings.ToUpper(v.Text)
+	default:
+		writeSQLString(b, v.Text, d)
 	}
-	return sqlString(v.Text, d)
 }
 
-// sqlString quotes text for the dialect: quotes doubled everywhere,
+// writeSQLString quotes text for the dialect: quotes doubled everywhere,
 // backslashes doubled for MySQL (an escape in its strings by default),
 // N'…' for SQL Server text beyond ASCII.
-func sqlString(s string, d db.Driver) string {
-	s = strings.ReplaceAll(s, "'", "''")
-	if d == db.MySQL {
-		s = strings.ReplaceAll(s, `\`, `\\`)
+func writeSQLString(b *bytes.Buffer, s string, d db.Driver) {
+	if d == db.SQLServer && !ascii(s) {
+		b.WriteByte('N')
 	}
-	if d == db.SQLServer {
-		for _, r := range s {
-			if r > 127 {
-				return "N'" + s + "'"
-			}
+	b.WriteByte('\'')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\'':
+			b.WriteString("''")
+		case c == '\\' && d == db.MySQL:
+			b.WriteString(`\\`)
+		default:
+			b.WriteByte(c)
 		}
 	}
-	return "'" + s + "'"
+	b.WriteByte('\'')
+}
+
+func ascii(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // ── Markdown ────────────────────────────────────────────────────────────────
 
 type markdownWriter struct {
 	w   io.Writer
-	buf strings.Builder
+	buf bytes.Buffer
 }
 
+// markdownCell keeps a value inside its table cell: | escaped, line breaks
+// as <br>.
+var markdownCell = strings.NewReplacer("|", `\|`, "\r\n", "<br>", "\n", "<br>")
+
 func newMarkdown(w io.Writer, cols []db.ExportColumn) (*markdownWriter, error) {
-	var b strings.Builder
+	m := &markdownWriter{w: w}
+	b := &m.buf
 	b.WriteString("|")
 	for _, c := range cols {
-		b.WriteString(" " + markdownCell(c.Name) + " |")
+		b.WriteByte(' ')
+		markdownCell.WriteString(b, c.Name)
+		b.WriteString(" |")
 	}
 	b.WriteString("\n|")
 	for _, c := range cols {
@@ -397,8 +474,8 @@ func newMarkdown(w io.Writer, cols []db.ExportColumn) (*markdownWriter, error) {
 		}
 	}
 	b.WriteString("\n")
-	_, err := io.WriteString(w, b.String())
-	return &markdownWriter{w: w}, err
+	_, err := m.w.Write(b.Bytes())
+	return m, err
 }
 
 func (m *markdownWriter) Row(values []db.Value) error {
@@ -406,23 +483,17 @@ func (m *markdownWriter) Row(values []db.Value) error {
 	b.Reset()
 	b.WriteString("|")
 	for _, v := range values {
-		text := markdownCell(v.Text)
+		b.WriteByte(' ')
 		if v.Null {
-			text = "*NULL*"
+			b.WriteString("*NULL*")
+		} else {
+			markdownCell.WriteString(b, v.Text)
 		}
-		b.WriteString(" " + text + " |")
+		b.WriteString(" |")
 	}
 	b.WriteString("\n")
-	_, err := io.WriteString(m.w, b.String())
+	_, err := m.w.Write(b.Bytes())
 	return err
 }
 
 func (m *markdownWriter) Close() error { return nil }
-
-// markdownCell keeps a value inside its table cell: | escaped, line breaks
-// as <br>.
-func markdownCell(s string) string {
-	s = strings.ReplaceAll(s, "|", `\|`)
-	s = strings.ReplaceAll(s, "\r\n", "<br>")
-	return strings.ReplaceAll(s, "\n", "<br>")
-}

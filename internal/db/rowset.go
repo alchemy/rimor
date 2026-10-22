@@ -108,6 +108,22 @@ func (s *RowSet) Cell(row, col int) Value {
 	return c.cell((row-s.starts[i])*len(s.columns) + col)
 }
 
+// Row copies a fetched row, with its edited values, into dst (one Value
+// per column), under one lock and one chunk lookup.
+func (s *RowSet) Row(row int, dst []Value) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	i := sort.Search(len(s.starts), func(i int) bool { return s.starts[i] > row }) - 1
+	c, base := s.chunks[i], (row-s.starts[i])*len(s.columns)
+	for col := range dst {
+		if v, ok := s.edits[[2]int{row, col}]; ok {
+			dst[col] = v
+			continue
+		}
+		dst[col] = c.cell(base + col)
+	}
+}
+
 // SetCell records a cell's value after an edit was saved.
 func (s *RowSet) SetCell(row, col int, v Value) {
 	s.mu.Lock()

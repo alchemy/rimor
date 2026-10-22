@@ -151,7 +151,7 @@ func (f *connForm) validate() bool {
 }
 
 // choice renders options as a segmented control, the chosen one marked.
-func (f *connForm) choice(options []string, chosen int, focused bool) string {
+func choice(options []string, chosen int, focused bool) string {
 	var parts []string
 	for i, o := range options {
 		st := mutedStyle.Padding(0, 1)
@@ -318,7 +318,7 @@ func (f *connForm) View(int) string {
 		"",
 		label(fieldDSN, dsnLabel(db.Drivers[f.driver])) + f.dsn.View(),
 		"",
-		label(fieldReadOnly, "Read-only") + f.choice([]string{"no", "yes"}, b2i(f.readOnly), f.field == fieldReadOnly) +
+		label(fieldReadOnly, "Read-only") + choice([]string{"no", "yes"}, b2i(f.readOnly), f.field == fieldReadOnly) +
 			"  " + mutedStyle.Render(readOnlyHint(db.Drivers[f.driver])),
 		"",
 	}

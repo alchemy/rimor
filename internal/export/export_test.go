@@ -220,3 +220,22 @@ func TestDecimalSeparator(t *testing.T) {
 		}
 	}
 }
+
+// sqlValue is a value as an INSERT writes it.
+func sqlValue(v db.Value, c db.ExportColumn, d db.Driver) string {
+	var b bytes.Buffer
+	writeSQLValue(&b, v, columnsOf([]db.ExportColumn{c})[0], d)
+	return b.String()
+}
+
+func TestIsNumber(t *testing.T) {
+	for s, want := range map[string]bool{
+		"0": true, "7": true, "-12": true, "120.5": true, "1.5e-05": true, "2E+10": true, "0.5": true,
+		"": false, "007": false, "1.": false, ".5": false, "+1": false, "NaN": false, "Inf": false,
+		"1e": false, "--1": false, "1.2.3": false, "12a": false, "-": false,
+	} {
+		if got := isNumber(s); got != want {
+			t.Errorf("isNumber(%q) = %v", s, got)
+		}
+	}
+}

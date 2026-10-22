@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -50,13 +51,11 @@ func loadExportPrefs(path string) (exportPrefs, bool) {
 	return p, true
 }
 
-func (p exportPrefs) save(path string) {
+func (p exportPrefs) save(path string) error {
 	if path == "" {
-		return
+		return nil
 	}
-	data, _ := json.MarshalIndent(p, "", "  ")
-	_ = os.MkdirAll(filepath.Dir(path), 0o700)
-	_ = os.WriteFile(path, append(data, '\n'), 0o600)
+	return saveJSON(path, p)
 }
 
 // exportPrefsPath is export.json beside the session, or "" when the
@@ -81,8 +80,9 @@ const (
 	efFile
 )
 
-// nullChoices are how CSV and TSV may write NULL.
-var nullChoices = []string{"", "NULL", `\N`}
+// nullChoices are how CSV and TSV may write NULL, and how the dialog
+// names them.
+var nullChoices = []struct{ value, label string }{{"", "empty"}, {"NULL", "NULL"}, {`\N`, `\N`}}
 
 type exportDialog struct {
 	tab      *tab
@@ -90,7 +90,8 @@ type exportDialog struct {
 	set      *db.RowSet
 	setIndex int
 	driver   db.Driver
-	prefs    string // where the choices are remembered
+	writes   bool   // the statement may write: it is never run again
+	dir      string // the folder last exported to, remembered
 
 	format    export.Format
 	sep       rune // the locale's, or the other one
@@ -103,7 +104,6 @@ type exportDialog struct {
 	all       bool // run again and write every row
 	clipboard bool
 	file      textinput.Model
-	matches   []string
 
 	field exportField
 	width int
@@ -121,13 +121,13 @@ type exportRequestMsg struct{ tab *tab }
 // newExportDialog opens the dialog with the remembered choices.
 func (m *Model) newExportDialog(t *tab) (*exportDialog, tea.Cmd) {
 	r := t.run
-	d := &exportDialog{tab: t, run: r, set: r.set(), setIndex: r.cur, prefs: m.exportPrefsPath(),
+	d := &exportDialog{tab: t, run: r, set: r.set(), setIndex: r.cur, writes: db.MayWrite(r.query) != "",
 		table: newInput(), file: newInput()}
 	if t.sessionCtx.conn != nil {
 		d.driver = t.sessionCtx.conn.cfg().Driver
 	}
 	d.sep, d.decimal = export.ListSeparator(), export.DecimalSeparator()
-	prefs, ok := loadExportPrefs(d.prefs)
+	prefs, ok := loadExportPrefs(m.exportPrefsPath())
 	if ok {
 		for _, f := range export.Formats {
 			if f.String() == prefs.Format {
@@ -138,26 +138,26 @@ func (m *Model) newExportDialog(t *tab) (*exportDialog, tea.Cmd) {
 			d.sep = r[0]
 		}
 		for i, n := range nullChoices {
-			if n == prefs.Null {
+			if n.value == prefs.Null {
 				d.null = i
 			}
 		}
 		d.bom = prefs.BOM
 	}
 
-	d.table.SetValue("result")
+	// The table defaults to the result's own, else to the writer's "result".
+	d.table.Placeholder = "result"
 	if v := r.view(); v.origin != nil {
 		d.table.SetValue(v.origin.SQLTable())
 	}
-	dir := prefs.Dir
+	d.dir = prefs.Dir
+	dir := d.dir
 	if dir == "" {
 		dir, _ = os.Getwd()
 	}
 	d.file.SetValue(tildePath(filepath.Join(dir, exportName(t, r)+d.format.Ext())))
 	d.file.CursorEnd()
-	d.field = efFormat
 	d.setWidth(m.dialogWidth())
-	d.refreshMatches()
 
 	// The result's table, for INSERTs: found as editing finds it.
 	if v := r.view(); v.origin == nil && v.originErr == nil && d.setIndex == 0 &&
@@ -185,27 +185,24 @@ func (m *Model) exportOrigin(msg exportOriginMsg) {
 	if v.origin == nil && v.originErr == nil {
 		v.origin, v.originErr = msg.origin, msg.err
 	}
-	if msg.origin != nil && !d.tableSet {
+	if msg.origin == nil {
+		return
+	}
+	if !d.tableSet {
 		d.table.SetValue(msg.origin.SQLTable())
 	}
 	// The default file name follows the table, found only now.
-	if msg.origin != nil && !d.fileSet {
+	if !d.fileSet {
 		path := d.file.Value()
-		dir := path[:lastSeparator(path)+1]
-		d.file.SetValue(dir + exportName(d.tab, d.run) + d.format.Ext())
+		d.file.SetValue(path[:lastSeparator(path)+1] + exportName(d.tab, d.run) + d.format.Ext())
 		d.file.CursorEnd()
-		d.refreshMatches()
 	}
 }
 
 // exportName is the file's default name: the result's table, else the tab.
 func exportName(t *tab, r *run) string {
-	if v := r.view(); v.origin != nil && v.origin.Table != "" {
-		name := v.origin.Table
-		if i := strings.LastIndexByte(name, '.'); i >= 0 {
-			name = name[i+1:]
-		}
-		return strings.Trim(name, `"[]`+"`")
+	if v := r.view(); v.origin != nil && v.origin.Name() != "" {
+		return v.origin.Name()
 	}
 	return strings.TrimSuffix(t.title(), ".sql")
 }
@@ -227,8 +224,8 @@ func (d *exportDialog) incomplete() bool {
 // not every row is here, it writes nothing, and the tab's session is idle.
 func (d *exportDialog) canRunAgain() bool {
 	t := d.tab
-	return d.incomplete() && !d.clipboard && db.MayWrite(d.run.query) == "" &&
-		t.session != nil && t.sessionCtx == t.ctx && t.run == d.run && !t.run.busy()
+	return d.incomplete() && !d.clipboard && !d.writes &&
+		t.session != nil && t.sessionCtx == t.ctx && t.run == d.run && !t.busy()
 }
 
 // fields are the fields the dialog shows now.
@@ -309,10 +306,6 @@ func (d *exportDialog) setFormat(f export.Format) {
 	}
 }
 
-func (d *exportDialog) refreshMatches() {
-	d.matches = pathMatches(d.file.Value(), func(string, string) bool { return true })
-}
-
 func (d *exportDialog) Update(msg tea.Msg) (modal, tea.Cmd) {
 	switch msg := msg.(type) {
 	case exportTickMsg:
@@ -342,10 +335,10 @@ func (d *exportDialog) Update(msg tea.Msg) (modal, tea.Cmd) {
 			return d, nil
 		case "tab":
 			if d.field == efFile {
-				if value, ok := completePath(d.file.Value(), d.matches); ok {
+				matches := pathMatches(d.file.Value(), func(string, string) bool { return true })
+				if value, ok := completePath(d.file.Value(), matches); ok {
 					d.file.SetValue(value)
 					d.file.CursorEnd()
-					d.refreshMatches()
 				}
 				return d, nil
 			}
@@ -376,7 +369,6 @@ func (d *exportDialog) toInput(msg tea.Msg) (modal, tea.Cmd) {
 	case efFile:
 		d.file, cmd = d.file.Update(msg)
 		d.fileSet = true
-		d.refreshMatches()
 		d.status, d.overwrite = "", ""
 	}
 	return d, cmd
@@ -384,7 +376,7 @@ func (d *exportDialog) toInput(msg tea.Msg) (modal, tea.Cmd) {
 
 // options are the export's options as chosen.
 func (d *exportDialog) options() export.Options {
-	return export.Options{Format: d.format, Separator: d.sep, Decimal: d.decimal, Null: nullChoices[d.null],
+	return export.Options{Format: d.format, Separator: d.sep, Decimal: d.decimal, Null: nullChoices[d.null].value,
 		BOM: d.bom, Table: strings.TrimSpace(d.table.Value()), Driver: d.driver}
 }
 
@@ -398,7 +390,6 @@ func exportTick(d *exportDialog) tea.Cmd {
 // exportDoneMsg reports how an export went.
 type exportDoneMsg struct {
 	dialog *exportDialog
-	rows   int64
 	path   string // "" for the clipboard
 	text   string // for the clipboard
 	err    error
@@ -412,11 +403,12 @@ func (d *exportDialog) start() tea.Cmd {
 		d.working = true
 		return d.writeTo(o, "")
 	}
-	path := absPath(strings.TrimSpace(d.file.Value()))
-	if strings.TrimSpace(d.file.Value()) == "" {
+	name := strings.TrimSpace(d.file.Value())
+	if name == "" {
 		d.status = errorStyle.Render("Give the file a name.")
 		return nil
 	}
+	path := absPath(name)
 	info, err := os.Stat(path)
 	switch {
 	case err == nil && info.IsDir():
@@ -456,6 +448,7 @@ func (d *exportDialog) writeTo(o export.Options, path string) tea.Cmd {
 		var out io.Writer
 		var buf bytes.Buffer
 		var file *os.File
+		var fw *bufio.Writer
 		tmp := path + ".tmp"
 		if path == "" {
 			out = &buf
@@ -465,16 +458,16 @@ func (d *exportDialog) writeTo(o export.Options, path string) tea.Cmd {
 				done.err = err
 				return done
 			}
-			file, out = f, f
+			file, fw = f, bufio.NewWriter(f)
+			out = fw
 		}
-		bw := &countingWriter{w: out}
 
 		var w export.Writer
 		row := func(values []db.Value) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if path == "" && bw.n > clipboardLimit {
+			if path == "" && buf.Len() > clipboardLimit {
 				return errTooBigForClipboard
 			}
 			d.written.Add(1)
@@ -484,17 +477,15 @@ func (d *exportDialog) writeTo(o export.Options, path string) tea.Cmd {
 		if all {
 			err = db.ExportQuery(ctx, session, driver, query, index, func(c []db.ExportColumn) error {
 				var err error
-				w, err = export.New(bw, o, c)
+				w, err = export.New(out, o, c)
 				return err
 			}, row)
 		} else {
-			if w, err = export.New(bw, o, cols); err == nil {
+			if w, err = export.New(out, o, cols); err == nil {
 				n := set.Len()
 				values := make([]db.Value, len(cols))
 				for i := 0; i < n && err == nil; i++ {
-					for c := range cols {
-						values[c] = set.Cell(i, c)
-					}
+					set.Row(i, values)
 					err = row(values)
 				}
 			}
@@ -502,8 +493,10 @@ func (d *exportDialog) writeTo(o export.Options, path string) tea.Cmd {
 		if err == nil && w != nil {
 			err = w.Close()
 		}
-		done.rows = d.written.Load()
 		if file != nil {
+			if err == nil {
+				err = fw.Flush()
+			}
 			if cerr := file.Close(); err == nil {
 				err = cerr
 			}
@@ -524,18 +517,6 @@ func (d *exportDialog) writeTo(o export.Options, path string) tea.Cmd {
 
 var errTooBigForClipboard = fmt.Errorf("too large for the clipboard, which terminals limit to about %d MB: export to a file", clipboardLimit>>20)
 
-// countingWriter counts what passes through it.
-type countingWriter struct {
-	w io.Writer
-	n int64
-}
-
-func (c *countingWriter) Write(p []byte) (int, error) {
-	n, err := c.w.Write(p)
-	c.n += int64(n)
-	return n, err
-}
-
 // exportDone closes the dialog with a note, or shows why it failed.
 func (m *Model) exportDone(msg exportDoneMsg) tea.Cmd {
 	d := msg.dialog
@@ -551,20 +532,15 @@ func (m *Model) exportDone(msg exportDoneMsg) tea.Cmd {
 		}
 		return nil
 	}
-	prefs := exportPrefs{Format: d.format.String(), Separator: string(d.sep), Null: nullChoices[d.null], BOM: d.bom}
 	if msg.path != "" {
-		prefs.Dir = filepath.Dir(msg.path)
-	} else if old, ok := loadExportPrefs(d.prefs); ok {
-		prefs.Dir = old.Dir
+		d.dir = filepath.Dir(msg.path)
 	}
-	prefs.save(d.prefs)
+	prefs := exportPrefs{Format: d.format.String(), Separator: string(d.sep), Null: nullChoices[d.null].value, BOM: d.bom, Dir: d.dir}
+	prefs.save(m.exportPrefsPath())
 	if m.modal == d {
 		m.modal = nil
 	}
-	rows := fmt.Sprintf("%d rows", msg.rows)
-	if msg.rows == 1 {
-		rows = "1 row"
-	}
+	rows := plural(d.written.Load(), "row")
 	if msg.path == "" {
 		m.results.notice = okStyle.Render("✓ Copied " + rows + " as " + d.format.String())
 		return tea.SetClipboard(msg.text)
@@ -583,24 +559,13 @@ func (d *exportDialog) View(int) string {
 		}
 		return st.Width(12).Render(text)
 	}
-	choices := func(f exportField, items []string, cur int) string {
-		var out []string
-		for i, it := range items {
-			st := mutedStyle.Padding(0, 1)
-			if i == cur {
-				st = textStyle.Padding(0, 1)
-				if f == d.field && !d.working {
-					st = badgeFocusedStyle.Padding(0, 1)
-				}
-			}
-			out = append(out, st.Render(it))
-		}
-		return strings.Join(out, "")
+	choices := func(f exportField, options []string, chosen int) string {
+		return choice(options, chosen, f == d.field && !d.working)
 	}
 
 	var rows []string
 	n := d.set.Len()
-	what := fmt.Sprintf("%d rows, %d columns", n, len(d.set.Columns()))
+	what := plural(int64(n), "row") + ", " + plural(int64(len(d.set.Columns())), "column")
 	rows = append(rows, "", textStyle.Render(what))
 	if d.incomplete() && !d.all {
 		p := d.set.Progress()
@@ -624,38 +589,26 @@ func (d *exportDialog) View(int) string {
 			}
 			rows = append(rows, label(f, "Format")+choices(f, names, int(d.format)))
 		case efSeparator:
-			cur := 0
-			if d.sep == ',' {
-				cur = 1
-			}
-			row := label(f, "Separator") + choices(f, []string{"; semicolon", ", comma"}, cur)
+			row := label(f, "Separator") + choices(f, []string{"; semicolon", ", comma"}, b2i(d.sep == ','))
 			// Spreadsheets of decimal-comma locales want their decimals so.
 			if export.DecimalComma(d.options()) {
 				row += mutedStyle.Render("  decimals 120,5")
 			}
 			rows = append(rows, row)
 		case efNull:
-			rows = append(rows, label(f, "NULL as")+choices(f, []string{"empty", "NULL", `\N`}, d.null))
-		case efBOM:
-			cur := 0
-			if d.bom {
-				cur = 1
+			names := make([]string, len(nullChoices))
+			for i, c := range nullChoices {
+				names[i] = c.label
 			}
-			rows = append(rows, label(f, "BOM")+choices(f, []string{"no", "yes, for Excel"}, cur))
+			rows = append(rows, label(f, "NULL as")+choices(f, names, d.null))
+		case efBOM:
+			rows = append(rows, label(f, "BOM")+choices(f, []string{"no", "yes, for Excel"}, b2i(d.bom)))
 		case efTable:
 			rows = append(rows, label(f, "Table")+" "+d.table.View()) // in line with the choices
 		case efRows:
-			cur := 0
-			if d.all {
-				cur = 1
-			}
-			rows = append(rows, label(f, "Rows")+choices(f, []string{fmt.Sprintf("the %d here", n), "all: run it again"}, cur))
+			rows = append(rows, label(f, "Rows")+choices(f, []string{"the " + groupDigits(int64(n)) + " here", "all: run it again"}, b2i(d.all)))
 		case efTo:
-			cur := 0
-			if d.clipboard {
-				cur = 1
-			}
-			rows = append(rows, label(f, "To")+choices(f, []string{"a file", "the clipboard"}, cur))
+			rows = append(rows, label(f, "To")+choices(f, []string{"a file", "the clipboard"}, b2i(d.clipboard)))
 		case efFile:
 			rows = append(rows, label(f, "File")+" "+d.file.View())
 		}
@@ -669,7 +622,7 @@ func (d *exportDialog) View(int) string {
 	case d.all:
 		rows = append(rows, mutedStyle.Render("The statement runs again on this tab's session; every row goes to the file."))
 	default:
-		rows = append(rows, mutedStyle.Render(""))
+		rows = append(rows, "")
 	}
 
 	body := lipgloss.NewStyle().Padding(0, 2).Render(strings.Join(rows, "\n"))

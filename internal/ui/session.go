@@ -60,8 +60,11 @@ func loadSession(path string) (session, error) {
 	return s, json.Unmarshal(data, &s)
 }
 
-func saveSession(path string, s session) error {
-	data, err := json.MarshalIndent(s, "", "  ")
+func saveSession(path string, s session) error { return saveJSON(path, s) }
+
+// saveJSON writes v indented to path, through a temporary file.
+func saveJSON(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}

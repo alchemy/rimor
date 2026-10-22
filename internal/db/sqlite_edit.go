@@ -51,6 +51,7 @@ func describeSQLite(ctx context.Context, conn *sql.Conn, query string, columns i
 	o := newOrigin(SQLite, columns)
 	o.table = sqliteQuote(schema) + "." + sqliteQuote(table)
 	o.Table = table
+	o.schema, o.name = schema, table
 	if schema != "main" {
 		o.Table = schema + "." + table
 	}

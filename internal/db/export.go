@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 
 	"github.com/golang-sql/sqlexp"
 )
@@ -17,18 +16,19 @@ import (
 // the explorer's scripts do.
 func QuoteName(d Driver, name string) string { return quoter{d}.ident(name) }
 
-// QualifiedName names an object with its schema in the driver's dialect.
-func QualifiedName(d Driver, schema, name string) string { return quoter{d}.qualified(schema, name) }
-
-// SQLTable is the result's table for exported INSERTs: its readable name
-// quoted as the scripts quote names, so customers rather than editing's
-// fully qualified "main"."customers".
+// SQLTable is the result's table for exported INSERTs, quoted as the
+// scripts quote names: customers rather than editing's "main"."customers".
+// An attached SQLite database keeps its name (aux.t).
 func (o *Origin) SQLTable() string {
-	if schema, table, ok := strings.Cut(o.Table, "."); ok {
-		return QualifiedName(o.driver, schema, table)
+	q := quoter{o.driver}
+	if o.driver == SQLite && o.schema != "" && o.schema != "main" {
+		return q.ident(o.schema) + "." + q.ident(o.name)
 	}
-	return QualifiedName(o.driver, "", o.Table)
+	return q.qualified(o.schema, o.name)
 }
+
+// Name is the result's table, unqualified.
+func (o *Origin) Name() string { return o.name }
 
 // ExportColumn is a result column as an export writes it.
 type ExportColumn struct {
@@ -61,7 +61,14 @@ func ExportQuery(ctx context.Context, s *sql.Conn, d Driver, query string, set i
 		}
 		if len(types) > 0 {
 			if n == set {
-				return exportRows(rows, types, start, row)
+				if err := exportRows(rows, types, start, row); err != nil {
+					return err
+				}
+				// A batch's later statements run as their results are read
+				// (MySQL): read them, so that an error among them counts.
+				for rows.NextResultSet() {
+				}
+				return rows.Err()
 			}
 			n++
 		}
