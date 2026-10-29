@@ -86,48 +86,69 @@ func ExportQuery(ctx context.Context, s *sql.Conn, d Driver, query string, set i
 // statement without rows (DECLARE …; SELECT …).
 func exportMSSQL(ctx context.Context, s *sql.Conn, query string, set int,
 	start func([]ExportColumn) error, row func([]Value) error) error {
+	batches := splitGO(query)
+	if len(batches) == 0 {
+		batches = []sqlBatch{{Text: query}}
+	}
+	e := &mssqlExport{set: set, start: start, row: row}
+	for _, b := range batches {
+		if err := e.batch(ctx, s, b.Text); err != nil {
+			return err
+		}
+	}
+	switch {
+	case e.err != nil:
+		return e.err
+	case !e.done:
+		return ErrNoResult
+	}
+	return nil
+}
+
+// mssqlExport follows an export across a script's batches.
+type mssqlExport struct {
+	set   int
+	n     int  // result sets with columns so far
+	done  bool // the set was exported
+	err   error
+	start func([]ExportColumn) error
+	row   func([]Value) error
+}
+
+// batch reads one batch, exporting the set when it comes. An error of the
+// script before the set stops the export; after it, it still counts.
+func (e *mssqlExport) batch(ctx context.Context, s *sql.Conn, text string) error {
 	msgs := &sqlexp.ReturnMessage{}
-	rows, err := s.QueryContext(ctx, query, msgs)
+	rows, err := s.QueryContext(ctx, text, msgs)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	var batchErr error
-	n, done := 0, false
 	for {
 		switch m := msgs.Message(ctx).(type) {
 		case sqlexp.MsgError:
-			if batchErr == nil {
-				batchErr = m.Error
+			if e.err == nil {
+				e.err = m.Error
 			}
 		case sqlexp.MsgNext:
-			if types, err := rows.ColumnTypes(); err == nil && len(types) > 0 && !done {
-				if n == set {
-					if batchErr != nil {
-						return batchErr
+			if types, err := rows.ColumnTypes(); err == nil && len(types) > 0 && !e.done {
+				if e.n == e.set {
+					if e.err != nil {
+						return e.err
 					}
-					if err := exportRows(rows, types, start, row); err != nil {
+					if err := exportRows(rows, types, e.start, e.row); err != nil {
 						return err
 					}
-					done = true // read the rest of the batch: its errors count
+					e.done = true // read the rest: its errors count
 					continue
 				}
-				n++
+				e.n++
 			}
 			for rows.Next() {
 			}
 		case sqlexp.MsgNextResultSet:
 			if !rows.NextResultSet() {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				if batchErr != nil {
-					return batchErr
-				}
-				if !done {
-					return ErrNoResult
-				}
-				return nil
+				return ctx.Err()
 			}
 		}
 	}

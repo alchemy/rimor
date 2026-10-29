@@ -251,3 +251,51 @@ SELECT i FROM c; SELECT 'never' AS later;`, RunOptions{Driver: SQLServer, Memory
 	}
 	stillUsable(t, conn)
 }
+
+// GO splits a script into batches, as SSMS does: CREATE PROCEDURE must
+// open its batch, each batch runs even after an error in one before, and
+// errors are numbered from the top of the script.
+func TestRunSQLServerGO(t *testing.T) {
+	conn := mssqlSession(t)
+	res, p, err := runMS(t, conn, `SET NOCOUNT ON;
+GO
+CREATE PROCEDURE #rimor_go AS SELECT 'one' AS a
+GO
+SELECT 1/0 AS boom
+GO
+EXEC #rimor_go
+GO 2
+`, 0)
+	if err != nil || res.Rows == nil || p.Err != nil {
+		t.Fatalf("script: %v %+v %+v", err, res, p)
+	}
+	sets := res.Batch.Sets()
+	// SELECT 1/0 starts a result before it fails; then EXEC twice.
+	var names []string
+	for _, s := range sets {
+		names = append(names, s.Columns()[0].Name)
+	}
+	if strings.Join(names, " ") != "boom a a" {
+		t.Errorf("results %q", names)
+	}
+	msgs, _ := res.Batch.Messages()
+	var errs []string
+	for _, m := range msgs {
+		if m.Kind == MessageError {
+			errs = append(errs, m.Text)
+		}
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0], "Line 5") || !strings.Contains(errs[0], "zero") {
+		t.Errorf("errors %q", errs)
+	}
+	if e := Describe(res.Batch.Err()); e.Line != 5 {
+		t.Errorf("caret line %d, want 5 (the script's, not the batch's)", e.Line)
+	}
+	stillUsable(t, conn)
+
+	// GO inside a string is no separator.
+	res, p, err = runMS(t, conn, "SELECT 'a\nGO\nb' AS s", 0)
+	if err != nil || res.Rows == nil || res.Rows.Cell(0, 0).Text != "a\nGO\nb" {
+		t.Errorf("GO in a string: %v %+v", err, p)
+	}
+}

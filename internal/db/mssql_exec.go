@@ -147,31 +147,84 @@ func (b *Batch) add(s *RowSet) {
 	b.notify()
 }
 
-// batchReader reads a batch's message queue.
+// batchReader reads a script's batches (split at GO) in turn, each
+// through its message queue, into one Batch.
 type batchReader struct {
-	ctx   context.Context
-	rows  *sql.Rows
-	msgs  *sqlexp.ReturnMessage
-	batch *Batch
-	res   *Result
-	opts  RunOptions
-	err   error // the first error, as the driver gave it
+	ctx     context.Context
+	conn    *sql.Conn
+	batches []sqlBatch
+	next    int // the batch to start after the current one
+	offset  int // the script line the current batch starts on
+	rows    *sql.Rows
+	msgs    *sqlexp.ReturnMessage
+	batch   *Batch
+	res     *Result
+	opts    RunOptions
+	err     error // the first error, as the driver gave it
+}
+
+// start sends batch i.
+func (r *batchReader) start(i int) error {
+	msgs := &sqlexp.ReturnMessage{}
+	r.next, r.offset = i+1, r.batches[i].Line
+	rows, err := r.conn.QueryContext(r.ctx, r.batches[i].Text, msgs)
+	if err != nil {
+		return r.shift(err)
+	}
+	r.rows, r.msgs = rows, msgs
+	return nil
+}
+
+// shift numbers an error's line from the top of the script rather than
+// of its batch.
+func (r *batchReader) shift(err error) error {
+	var ms mssql.Error
+	if r.offset > 0 && errors.As(err, &ms) {
+		ms.LineNo += int32(r.offset)
+		return ms
+	}
+	return err
+}
+
+// advance starts the script's next batch once one is over, as SSMS does,
+// even after an error in it. It reports false when none is left.
+func (r *batchReader) advance() bool {
+	for r.next < len(r.batches) && r.ctx.Err() == nil {
+		r.rows.Close()
+		if err := r.start(r.next); err != nil {
+			r.failed(err)
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// failed records an error of the script.
+func (r *batchReader) failed(err error) {
+	err = r.shift(err)
+	if r.err == nil {
+		r.err = err
+	}
+	r.batch.logError(err)
 }
 
 // runMSSQL runs a batch until its first result set with columns, which it
 // starts fetching with the rest of the batch; without one, the result is
 // the rows the batch affected, and its first error.
 func runMSSQL(ctx context.Context, conn *sql.Conn, query string, opts RunOptions) (*Result, error) {
-	msgs := &sqlexp.ReturnMessage{}
-	rows, err := conn.QueryContext(ctx, query, msgs)
-	if err != nil {
-		return nil, err
+	batches := splitGO(query)
+	if len(batches) == 0 {
+		batches = []sqlBatch{{Text: query}}
 	}
 	b := &Batch{updated: make(chan struct{}, 1), cancel: opts.Cancel}
-	r := &batchReader{ctx: ctx, rows: rows, msgs: msgs, batch: b, res: &Result{Batch: b}, opts: opts}
+	r := &batchReader{ctx: ctx, conn: conn, batches: batches, batch: b, res: &Result{Batch: b}, opts: opts}
+	if err := r.start(0); err != nil {
+		return nil, err
+	}
 	first := r.nextSet()
 	if first == nil {
-		rows.Close()
+		r.rows.Close()
 		r.end()
 		return r.res, r.err
 	}
@@ -192,10 +245,7 @@ func (r *batchReader) nextSet() *RowSet {
 		case sqlexp.MsgNotice:
 			r.batch.log(Message{Kind: MessageInfo, Text: m.Message.String()})
 		case sqlexp.MsgError:
-			if r.err == nil {
-				r.err = m.Error
-			}
-			r.batch.logError(m.Error)
+			r.failed(m.Error)
 		case sqlexp.MsgNext:
 			if types, err := r.rows.ColumnTypes(); err == nil && len(types) > 0 {
 				set := newRowSet(types, r.opts)
@@ -205,13 +255,13 @@ func (r *batchReader) nextSet() *RowSet {
 			for r.rows.Next() {
 			}
 		case sqlexp.MsgNextResultSet:
-			if !r.rows.NextResultSet() {
-				if err := r.rows.Err(); err != nil && r.ctx.Err() == nil {
-					r.batch.logError(err)
-					if r.err == nil {
-						r.err = err
-					}
-				}
+			if r.rows.NextResultSet() {
+				continue
+			}
+			if err := r.rows.Err(); err != nil && r.ctx.Err() == nil {
+				r.failed(err)
+			}
+			if !r.advance() {
 				return nil
 			}
 		}
