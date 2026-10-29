@@ -290,8 +290,16 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case runDoneMsg, rowsMsg:
 		cmd := m.query.Update(msg)
+		if done, ok := msg.(runDoneMsg); ok {
+			m.changeConflict(done)
+		}
 		m.checkWaiters()
 		return cmd
+	case changeForceMsg:
+		if msg.tab.closed {
+			return nil
+		}
+		return m.query.run(msg.tab, true)
 	case waitTimeoutMsg:
 		m.waitTimedOut(msg.w)
 		return nil

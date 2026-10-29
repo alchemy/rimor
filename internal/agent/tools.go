@@ -130,7 +130,7 @@ var Tools = []Tool{
 		Name:  "list_tabs",
 		Title: "List query tabs",
 		Description: "The open query tabs: id, title, connection and database, whether you opened it, which one the user is looking at, " +
-			"and whether you may read its results.",
+			"whether you may read its results, and the procedure, function, view or trigger it changes when the user opened its definition to edit (running it applies the edit).",
 		InputSchema: object(map[string]any{}),
 		Annotations: readOnly,
 	},

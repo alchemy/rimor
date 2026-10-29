@@ -344,6 +344,8 @@ type agentTab struct {
 	ByAgent    bool   `json:"opened_by_agent,omitempty"`
 	Current    bool   `json:"current,omitempty"`
 	Unsaved    bool   `json:"unsaved,omitempty"`
+	// Changes is the object running the whole tab changes: "view v".
+	Changes string `json:"changes,omitempty"`
 	// Results the agent may read (read_results), or has asked for.
 	ResultsShared    bool `json:"results_shared,omitempty"`
 	ResultsRequested bool `json:"results_requested,omitempty"`
@@ -355,6 +357,9 @@ func (m *Model) describeTab(t *tab) agentTab {
 		ResultsShared: t.shareResults, ResultsRequested: t.wantResults && !t.shareResults}
 	if t.ctx.conn != nil {
 		a.Connection = t.ctx.conn.cfg().Name
+	}
+	if t.change != nil {
+		a.Changes = t.change.What()
 	}
 	return a
 }

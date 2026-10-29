@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ type run struct {
 	started time.Time
 	cancel  context.CancelFunc
 	running bool // executing; the result is not back yet
+	change  bool // applied the tab's change (see change.go)
 
 	res *db.Result
 	err *db.Error
@@ -109,7 +111,10 @@ func watchRows(t *tab, gen int, res *db.Result) tea.Cmd {
 }
 
 // Run executes the selection, or the whole tab, on the tab's session.
-func (q *QueryPane) Run(t *tab) tea.Cmd {
+func (q *QueryPane) Run(t *tab) tea.Cmd { return q.run(t, false) }
+
+// run is Run; force applies a change tab over someone else's change.
+func (q *QueryPane) run(t *tab, force bool) tea.Cmd {
 	if t.busy() {
 		return nil
 	}
@@ -129,13 +134,22 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 		q.notice = mutedStyle.Render("Nothing to run")
 		return nil
 	}
+	var change *db.Change
+	if t.change != nil && line == 0 && col == 0 && text == t.ed.Text() {
+		if reason := t.cannotChange(); reason != "" {
+			q.notice = errorStyle.Render(reason)
+			return nil
+		}
+		c := *t.change
+		change = &c
+	}
 
 	if t.session != nil && t.sessionCtx != t.ctx {
 		t.dropSession()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.runs++
-	t.run = &run{gen: t.runs, query: text, line: line, col: col, started: time.Now(), cancel: cancel, running: true}
+	t.run = &run{gen: t.runs, query: text, line: line, col: col, started: time.Now(), cancel: cancel, running: true, change: change != nil}
 	t.sessionCtx = t.ctx
 
 	gen, pool, database, session := t.runs, t.ctx.conn.pool, t.ctx.database, t.session
@@ -159,7 +173,13 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 			}
 			// Run releases the context itself, when the statement or the
 			// fetch of its rows ends.
-			res, err := db.Run(ctx, session, text, opts)
+			var res *db.Result
+			var err error
+			if change != nil {
+				res, err = db.ApplyChange(ctx, session, *change, text, opts, force)
+			} else {
+				res, err = db.Run(ctx, session, text, opts)
+			}
 			if err != nil && inTx && db.IsConnLost(err) {
 				// A fresh session would run it outside the transaction.
 				return runDoneMsg{tab: t, gen: gen, err: fmt.Errorf("%w: %w", errTxLost, err), session: session}
@@ -209,6 +229,9 @@ func (q *QueryPane) finish(msg runDoneMsg) tea.Cmd {
 	if msg.err != nil {
 		e := db.Describe(msg.err)
 		r.err = &e
+		if errors.As(msg.err, new(*db.ChangedError)) {
+			r.change = false // nothing was applied
+		}
 		if db.IsConnLost(msg.err) {
 			t.dropSession()
 		}

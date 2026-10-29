@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"rimor.dev/internal/db"
 	"rimor.dev/internal/paths"
 )
 
@@ -23,6 +24,10 @@ type sessionTab struct {
 	Line       int     `json:"line"`
 	Col        int     `json:"col"`
 	Agent      bool    `json:"agent,omitempty"` // opened by an agent
+	// A change tab's object; its text is kept even unchanged, as the
+	// script it opened with (Opened).
+	Change *db.Change `json:"change,omitempty"`
+	Opened bool       `json:"opened,omitempty"`
 }
 
 type session struct {
@@ -89,10 +94,12 @@ func (q *QueryPane) snapshot() session {
 		if t.ctx.conn != nil {
 			st.Connection = t.ctx.conn.cfg().Name
 		}
-		if t.dirty() {
+		if t.dirty() || t.change != nil && t.path == "" {
 			text := t.ed.Text()
 			st.Content = &text
+			st.Opened = !t.dirty()
 		}
+		st.Change = t.change
 		st.Line, st.Col = t.ed.CursorPosition()
 		s.Tabs = append(s.Tabs, st)
 	}
@@ -126,7 +133,7 @@ func (q *QueryPane) restore(s session, resolve func(string) *connection) {
 		}
 		if st.Content != nil {
 			t.ed.SetText(*st.Content)
-			if t.path == "" && *st.Content == "" {
+			if t.path == "" && *st.Content == "" || st.Opened {
 				t.saved = t.ed.Version()
 			} else {
 				t.saved = -1 // unsaved changes survive as unsaved
@@ -134,6 +141,9 @@ func (q *QueryPane) restore(s session, resolve func(string) *connection) {
 		}
 		t.ed.SetCursorPosition(st.Line, st.Col)
 		t.agent, t.agentVersion = st.Agent, t.ed.Version()
+		if t.ctx.conn != nil {
+			t.change = st.Change // only on the server it was opened on
+		}
 		q.tabs = append(q.tabs, t)
 	}
 	q.active = min(max(s.Active, 0), max(len(q.tabs)-1, 0))

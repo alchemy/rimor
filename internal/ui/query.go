@@ -80,6 +80,9 @@ type tab struct {
 	txChecking bool
 	// exporting while an export runs the statement again on the session.
 	exporting bool
+	// change is the object a change script changes when the whole tab runs
+	// (see change.go); nil for other tabs.
+	change *db.Change
 
 	// Statements run on a connection of their own, opened on first run.
 	session    *sql.Conn
@@ -111,6 +114,7 @@ func (t *tab) setContext(ctx queryContext) {
 	}
 	t.ctx = ctx
 	t.shareResults = false // granted for the server it ran on
+	t.change = nil         // the object is on the old context's server
 	t.ed.SetLanguage(ctx.language())
 	if !t.cancelRun() {
 		t.dropSession() // a running statement drops it when it returns
@@ -314,6 +318,9 @@ func (q *QueryPane) Update(msg tea.Msg) tea.Cmd {
 		return q.finish(msg)
 	case txCheckedMsg:
 		q.txChecked(msg)
+		if msg.change {
+			q.changed(msg.tab, msg.definition, msg.definitionErr)
+		}
 		return nil
 	case rowsMsg:
 		return q.rowsArrived(msg)
@@ -460,6 +467,9 @@ func (q *QueryPane) Status() string {
 		return ""
 	}
 	s := t.ctx.render()
+	if note := changeMarker(t); note != "" {
+		s += mutedStyle.Render(" · ") + note
+	}
 	if note := txMarker(t); note != "" {
 		s += mutedStyle.Render(" · ") + note
 	}
@@ -483,6 +493,10 @@ func (q *QueryPane) Footer(focused bool) string {
 		return ""
 	}
 	line, col := t.ed.CursorPosition()
+	run := "run"
+	if t.change != nil && t.ed.SelectedText() == "" {
+		run = "change the " + db.KindName(t.change.Kind)
+	}
 	return mutedStyle.Render(fmt.Sprintf("%d:%d", line+1, col+1)) + "  " +
-		hints(q.runKey, "run", "^e", "context", "^s", "save")
+		hints(q.runKey, run, "^e", "context", "^s", "save")
 }

@@ -46,6 +46,11 @@ It supports **PostgreSQL**, **MySQL** and **MariaDB**, **SQL Server** and **SQLi
   or index offers ready-made SQL in that database's dialect: the first rows,
   an insert or update to fill in, a call with every parameter. It opens in
   a new tab, and runs only when you run it.
+- **Changing procedures, functions, views and triggers.** Their change
+  script opens the definition as the server has it; running the whole tab
+  applies your edit the way each engine allows, and refuses to overwrite a
+  change someone else made meanwhile. See
+  [Changing definitions](#changing-definitions).
 - **Query tabs.** Each tab has a *context*, a connection plus an optional
   database, shown in the pane's bottom border. A new tab takes the context
   of the item selected in the explorer, and `ctrl+e` changes it. Tabs save
@@ -70,7 +75,9 @@ It supports **PostgreSQL**, **MySQL** and **MariaDB**, **SQL Server** and **SQLi
 - **Batches and messages.** A SQL Server batch shows every result it
   returns (`[` and `]` switch between them) and, with `m`, its messages in
   order: `PRINT`, `SET STATISTICS` output, each statement's rows affected,
-  and errors where they happened.
+  and errors where they happened. Scripts split into batches by `GO` lines
+  run as in SQL Server Management Studio: each batch in turn, `GO 5`
+  repeating one, errors on the script's own line numbers.
 - **Cell viewer and editing.** `enter` on a result cell opens its full value,
   selected for copying. When the result comes from one table and includes
   its key, the value can be edited there: rimor shows the `UPDATE` it will
@@ -219,6 +226,29 @@ fields, `←`/`→` change a choice, and `enter` exports.
   streams every row into the file without the limit, binary values whole;
   `esc` stops it. It is offered only for statements that do not write, since
   running a write twice could change data twice.
+
+## Changing definitions
+
+The change script of a procedure, function, view or trigger (`s` on it in
+the explorer; for routines it comes first, so `S` opens it) puts its
+definition in a tab, and the status line says what the tab changes.
+Running the whole tab applies it; a selection runs as plain SQL.
+
+| Engine | How it is applied |
+|---|---|
+| PostgreSQL | `CREATE OR REPLACE`, as the server writes the definition. A view can only gain columns at its end; a function whose parameter types change becomes a second overload |
+| SQL Server | `ALTER`, after the module's own `ANSI_NULLS` and `QUOTED_IDENTIFIER` settings and a `GO` |
+| MariaDB | `CREATE OR REPLACE` |
+| MySQL | views with `CREATE OR REPLACE`. A routine or trigger cannot be changed in place: rimor creates your version under a temporary name first, so an error leaves the old one untouched, then drops the old one and creates yours, in the `sql_mode` it was created in. Privileges granted on a routine go with it |
+| SQLite | the view or trigger is dropped and created again inside a savepoint: an error leaves it as it was |
+
+Before applying, rimor compares the definition on the server with the one
+the tab opened. If someone changed or dropped the object since, it asks
+before overwriting; after each change, the tab compares with what it
+applied. The tab is saved with the session, object included, and forgets
+the object when its context changes. Nothing is applied on a read-only
+connection, nor on MySQL inside an open transaction, which the change
+would commit.
 
 ## Connections
 
@@ -398,10 +428,12 @@ first one straight away:
 | Object | Scripts |
 |---|---|
 | Table | select the first rows, count, insert, update or delete a row by its key, add a column, drop (commented out) |
-| View, materialized view | select the first rows, count, drop (commented out) |
+| View | select the first rows, count, change, drop (commented out) |
+| Materialized view | select the first rows, count, drop (commented out) |
 | Column | its most common values |
 | Foreign key | join the two tables; rows whose referenced row is missing |
-| Function, procedure | a call with a `NULL` for each parameter, named and typed |
+| Function, procedure | change; a call with a `NULL` for each parameter, named and typed |
+| Trigger (SQLite, MySQL) | change |
 | Sequence | its current value; restart |
 | Index | drop (commented out) |
 

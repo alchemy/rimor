@@ -76,6 +76,11 @@ var (
 		{keys: []string{"esc"}, desc: "Cancel: keep the transaction open"},
 	}}
 
+	changeKeys = keyScope{"Changed meanwhile", []binding{
+		{keys: []string{"o"}, desc: "Apply the tab anyway, over the other change"},
+		{keys: []string{"esc"}, desc: "Cancel: nothing is applied"},
+	}}
+
 	exportKeys = keyScope{"Export", []binding{
 		{keys: []string{"up", "shift+tab", "down"}, desc: "Previous / next field"},
 		{keys: []string{"left", "right", "space"}, desc: "Change the choice"},
@@ -219,7 +224,7 @@ var (
 // them after the app-wide keys.
 var allScopes = []keyScope{
 	paneKeys, explorerKeys, explorerFilterKeys, tabKeys, editorKeys, resultsKeys, messagesKeys, cellKeys,
-	connFormKeys, passwordKeys, pickerKeys, scriptMenuKeys, exportKeys, txKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
+	connFormKeys, passwordKeys, pickerKeys, scriptMenuKeys, exportKeys, txKeys, changeKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
 }
 
 // hereScopes are the key tables that apply where the user is, and a name
@@ -245,6 +250,8 @@ func (m *Model) hereScopes() (string, []keyScope) {
 		return "Scripts", []keyScope{scriptMenuKeys}
 	case *txDialog:
 		return "Open transaction", []keyScope{txKeys}
+	case *changeDialog:
+		return "Changed meanwhile", []keyScope{changeKeys}
 	case *exportDialog:
 		return "Export", []keyScope{exportKeys}
 	case *passwordPrompt:

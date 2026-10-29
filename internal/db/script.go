@@ -21,6 +21,9 @@ type Script struct {
 	Name   string // for the tab: "select"
 	Writes bool   // changes data or schema when run
 	SQL    string
+	// Change, for a "change" script, is the object it changes: running the
+	// whole tab goes through ApplyChange.
+	Change *Change
 }
 
 // HasScripts reports whether the explorer offers scripts for the object.
@@ -30,6 +33,8 @@ func HasScripts(d Driver, o Object) bool {
 		return o.Kind != KindColumn || o.Table != ""
 	case KindIndex:
 		return !o.Primary && ((d != SQLServer && d != MySQL) || o.Table != "")
+	case KindTrigger:
+		return Changeable(d, o)
 	}
 	return false
 }
@@ -48,7 +53,15 @@ func (p *Pool) Scripts(ctx context.Context, o Object, rows int) ([]Script, error
 		if o.Kind == KindTable {
 			return tableScripts(q, o, t, rows), nil
 		}
-		return viewScripts(q, o, t, rows), nil
+		scripts := viewScripts(q, o, t, rows)
+		if Changeable(d, o) {
+			change, err := p.changeScript(ctx, o)
+			if err != nil {
+				return nil, err
+			}
+			scripts = append(scripts[:2], append([]Script{change}, scripts[2:]...)...)
+		}
+		return scripts, nil
 	case KindColumn:
 		return columnScripts(q, o, rows), nil
 	case KindForeignKey:
@@ -67,7 +80,18 @@ func (p *Pool) Scripts(ctx context.Context, o Object, rows int) ([]Script, error
 		if err != nil {
 			return nil, err
 		}
-		return callScripts(q, o, r), nil
+		// Changing a routine comes first: S opens it straight away.
+		change, err := p.changeScript(ctx, o)
+		if err != nil {
+			return nil, err
+		}
+		return append([]Script{change}, callScripts(q, o, r)...), nil
+	case KindTrigger:
+		change, err := p.changeScript(ctx, o)
+		if err != nil {
+			return nil, err
+		}
+		return []Script{change}, nil
 	case KindSequence:
 		name := q.qualified(o.Schema, o.Name)
 		return []Script{

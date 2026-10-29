@@ -31,6 +31,10 @@ type txCheckedMsg struct {
 	session any // the session asked, to ignore answers about an old one
 	state   db.TxState
 	err     error
+	// After a change run: the object's definition now (see change.go).
+	change        bool
+	definition    string
+	definitionErr error
 }
 
 // busy reports whether the tab's session is in use: a run, or the check
@@ -45,12 +49,21 @@ func (q *QueryPane) checkTx(t *tab) tea.Cmd {
 		return nil
 	}
 	s, d := t.session, t.sessionCtx.conn.cfg().Driver
+	var change *db.Change
+	if t.change != nil && t.run != nil && t.run.change {
+		c := *t.change
+		change = &c
+	}
 	t.txChecking = true
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), txCheckTimeout)
 		defer cancel()
 		state, err := db.Transaction(ctx, s, d)
-		return txCheckedMsg{tab: t, session: s, state: state, err: err}
+		msg := txCheckedMsg{tab: t, session: s, state: state, err: err, change: change != nil}
+		if change != nil {
+			msg.definition, msg.definitionErr = db.Definition(ctx, s, *change)
+		}
+		return msg
 	}
 }
 

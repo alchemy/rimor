@@ -35,6 +35,7 @@ var handlerScopes = []struct {
 	{"dialogs.go", "*contextPicker.Update", pickerKeys},
 	{"scripts.go", "*scriptMenu.Update", scriptMenuKeys},
 	{"tx.go", "*txDialog.Update", txKeys},
+	{"change.go", "*changeDialog.Update", changeKeys},
 	{"export.go", "*exportDialog.Update", exportKeys},
 	{"oneshot.go", "*passwordPrompt.Update", passwordKeys},
 	{"help.go", "*helpOverlay.Update", helpKeys},
