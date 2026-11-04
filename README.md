@@ -4,7 +4,7 @@
 
 A terminal workbench for relational databases: browse the catalog, write SQL
 in tabs with syntax highlighting, and explore results in a scrollable grid.
-It supports **PostgreSQL**, **SQL Server** and **SQLite**.
+It supports **PostgreSQL**, **MySQL** and **MariaDB**, **SQL Server** and **SQLite**.
 
 ```
 ╭─ 1  Explorer ─────────╮╭─ 2  ○ untitled-1 ─ ● untitled-2 ● ──────────────────────────────────────╮
@@ -46,13 +46,18 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   or index offers ready-made SQL in that database's dialect: the first rows,
   an insert or update to fill in, a call with every parameter. It opens in
   a new tab, and runs only when you run it.
+- **Changing procedures, functions, views and triggers.** Their change
+  script opens the definition as the server has it; running the whole tab
+  applies your edit the way each engine allows, and refuses to overwrite a
+  change someone else made meanwhile. See
+  [Changing definitions](#changing-definitions).
 - **Query tabs.** Each tab has a *context*, a connection plus an optional
   database, shown in the pane's bottom border. A new tab takes the context
   of the item selected in the explorer, and `ctrl+e` changes it. Tabs save
   to `.sql` files, and the session (tabs, unsaved text, contexts, layout)
   comes back on the next start.
-- **Editor.** Syntax highlighting for each dialect (PostgreSQL, T-SQL,
-  SQLite), selection, undo/redo, clipboard, and indentation that follows
+- **Editor.** Syntax highlighting for each dialect (PostgreSQL, MySQL,
+  T-SQL, SQLite), selection, undo/redo, clipboard, and indentation that follows
   the previous line.
 - **Results.** Rows stream in the background: the first ones show within
   milliseconds while the rest arrive, with a live count, and `esc` stops
@@ -63,16 +68,34 @@ It supports **PostgreSQL**, **SQL Server** and **SQLite**.
   change data show the rows affected. Errors show the database's code and
   message, plus the failing line with a caret where the driver reports a
   position.
+- **Export.** `e` in the results writes the result as CSV, TSV, JSON, JSON
+  Lines, SQL `INSERT`s or Markdown, to a file or the clipboard; when only
+  part of a large result is in memory, it can run the query again into the
+  file. See [Exporting results](#exporting-results).
+- **Batches and messages.** A SQL Server batch shows every result it
+  returns (`[` and `]` switch between them) and, with `m`, its messages in
+  order: `PRINT`, `SET STATISTICS` output, each statement's rows affected,
+  and errors where they happened. Scripts split into batches by `GO` lines
+  run as in SQL Server Management Studio: each batch in turn, `GO 5`
+  repeating one, errors on the script's own line numbers.
 - **Cell viewer and editing.** `enter` on a result cell opens its full value,
   selected for copying. When the result comes from one table and includes
   its key, the value can be edited there: rimor shows the `UPDATE` it will
   run, changes only that row, and refuses if the row changed since it was
   loaded.
 - **Read-only connections.** A connection can be marked read-only: the
-  server (PostgreSQL) or the engine (SQLite) refuses writes, and on SQL Server
-  rimor refuses statements that write.
+  server (PostgreSQL, MySQL) or the engine (SQLite) refuses writes, and on
+  SQL Server rimor refuses statements that write.
 - **Sessions per tab.** Each tab runs on its own connection, so `USE`, `SET`,
-  temp tables and open transactions carry over between runs.
+  temp tables and open transactions carry over between runs. A tab inside a
+  transaction says so in its status line (`in transaction`, or `failed
+  transaction` when only a rollback can end it). Closing the tab, changing
+  its context, quitting, or disconnecting, editing or deleting its
+  connection first asks whether to commit or roll back; a failed
+  transaction can only be rolled back. The connection is then closed,
+  never handed to another tab or the explorer. If the connection is lost
+  inside a transaction, rimor says so: the server has rolled it back, and
+  the statement is not run again outside it.
 - **Layout.** Drag the borders between panes, or resize from the keyboard.
   Any pane can go full screen.
 - **AI agents.** An agent such as Claude Code, in another terminal, can
@@ -98,10 +121,34 @@ Windows on amd64 and arm64.
   unpacking; on Windows, SmartScreen may ask you to confirm.
 - **Arch Linux:** `rimor` (built from source) or `rimor-bin` (prebuilt) from
   the AUR, e.g. `yay -S rimor`.
-- **With Go** 1.27 or newer: `go install rimor.dev/cmd/rimor@latest`.
+- **With Go** 1.27 or newer: `go install rimor.dev/cmd/rimor@latest`. Right
+  after a release, `@latest` can still give the previous version for up to
+  half an hour, while Go's module proxy refreshes; name the version
+  (`@v0.8.1`) to get it at once.
 - **From a checkout:** `go build ./cmd/rimor`.
 
 `rimor -version` prints the version.
+
+### Updates
+
+Every 4 hours, at startup and while it runs, rimor asks GitHub whether a
+newer release is out. When one is, the query pane's top border shows it
+(`↑ v0.7.0`, linked to the release notes), and once per release a note
+says how to update: the release page, or the `go install` command for a
+binary built that way. `rimor -version` mentions it too.
+
+The check is one HTTPS request to `api.github.com`, without credentials.
+GitHub sees your address and, in the User-Agent, rimor's version; nothing
+else is sent. It runs in the background, gives up after 3 seconds, and
+fails silently: offline, behind a firewall, or past GitHub's limit for
+anonymous requests (60 an hour per address, shared in an office), rimor
+just tries again an hour later. The answer is kept in `update.json`
+beside the session, which other rimor windows share.
+
+Installs from a system package manager (the AUR packages, under `/usr`)
+never check, since the package manager updates them. Development builds
+never check either. To turn it off, set `check_updates = false` in
+`config.toml`.
 
 The Nerd Font icons appear automatically when your terminal bundles them
 (kitty, Ghostty, WezTerm) or a Nerd Font is installed; otherwise rimor uses
@@ -139,10 +186,72 @@ request.
 Editing needs a result from a single table that includes the table's
 primary key, or a unique key on non-null columns; on SQLite, a table
 without one can be edited through its `rowid` (`SELECT rowid, …`). Key columns and
-columns the database computes are not editable. The update only applies if
+columns the database computes are not editable. Editing MySQL and MariaDB
+results is not available yet: their driver does not say which table and
+column each result column comes from, which editing needs to be safe. The update only applies if
 the cell still holds the value it was opened with; otherwise rimor says the
 row changed and leaves it alone. It runs on the tab's connection, so inside
 an open transaction it can still be rolled back.
+
+## Exporting results
+
+`e` in the results opens the export dialog. `↑`/`↓` move between its
+fields, `←`/`→` change a choice, and `enter` exports.
+
+| Format | Notes |
+|---|---|
+| CSV | a header row, RFC 4180 quoting, `;` or `,`, an optional BOM for Excel |
+| TSV | tabs, quoted where a value holds a tab, a quote or a line break |
+| JSON | an array of objects: numbers as numbers in numeric columns, `true`/`false`, JSON columns as JSON, `NULL` as `null` |
+| JSON Lines | one object per line, for large results and tools such as `jq` |
+| SQL | `INSERT`s of 100 rows each, in the tab's dialect, into the result's table when it comes from one, else `result` |
+| Markdown | a table for issues and documents |
+
+- **The CSV separator** follows the system: `;` where numbers are written
+  with a decimal comma (Italian, German, French…; on Windows, the list
+  separator in the region settings), `,` elsewhere. The other one is a key
+  away, and the choice is remembered, with the format, how CSV writes
+  `NULL` (empty, `NULL` or `\N`) and the folder, in `export.json` beside the
+  session.
+- **Decimals** follow the locale too, but only in a CSV separated by `;`:
+  there, numeric columns write `120,5` where the locale writes decimals with
+  a comma, as its spreadsheets expect, and the dialog says so. A CSV
+  separated by `,` always writes `120.5`, and so do the other formats. Text
+  columns are never changed: a version such as `1.2.3` keeps its dots.
+- **Values** are written as the grid shows them, so an export matches what
+  you saw; binary values longer than 32 bytes, which the grid cuts, are cut
+  in it too.
+- **To the clipboard** for small results: terminals pass about 1 MB through
+  it, so larger exports go to a file.
+- **Every row of a large result:** fetching stops at `result_memory_mb`, and
+  the dialog then says not every row is here. **Rows: all** runs the
+  statement again on the tab's session, so temp tables still apply, and
+  streams every row into the file without the limit, binary values whole;
+  `esc` stops it. It is offered only for statements that do not write, since
+  running a write twice could change data twice.
+
+## Changing definitions
+
+The change script of a procedure, function, view or trigger (`s` on it in
+the explorer; for routines it comes first, so `S` opens it) puts its
+definition in a tab, and the status line says what the tab changes.
+Running the whole tab applies it; a selection runs as plain SQL.
+
+| Engine | How it is applied |
+|---|---|
+| PostgreSQL | `CREATE OR REPLACE`, as the server writes the definition. A view can only gain columns at its end; a function whose parameter types change becomes a second overload |
+| SQL Server | `ALTER`, after the module's own `ANSI_NULLS` and `QUOTED_IDENTIFIER` settings and a `GO` |
+| MariaDB | `CREATE OR REPLACE` |
+| MySQL | views with `CREATE OR REPLACE`. A routine or trigger cannot be changed in place: rimor creates your version under a temporary name first, so an error leaves the old one untouched, then drops the old one and creates yours, in the `sql_mode` it was created in. Privileges granted on a routine go with it |
+| SQLite | the view or trigger is dropped and created again inside a savepoint: an error leaves it as it was |
+
+Before applying, rimor compares the definition on the server with the one
+the tab opened. If someone changed or dropped the object since, it asks
+before overwriting; after each change, the tab compares with what it
+applied. The tab is saved with the session, object included, and forgets
+the object when its context changes. Nothing is applied on a read-only
+connection, nor on MySQL inside an open transaction, which the change
+would commit.
 
 ## Connections
 
@@ -155,11 +264,17 @@ connection.
 | PostgreSQL | `postgres://user:pass@localhost:5432/db?sslmode=disable` |
 | SQL Server | `sqlserver://user:pass@localhost:1433?database=db` |
 | SQLite | `/path/to/database.db` |
+| MySQL, MariaDB | `mysql://user:pass@localhost:3306/db`, or the driver's own `user:pass@tcp(localhost:3306)/db` |
 
 Characters with a special meaning in URLs must be percent-encoded in
 passwords (`@` is `%40`). For SQL Server, the URL path names an *instance*,
 not a database; the database goes in `?database=`. Add
 `&TrustServerCertificate=true` for servers with self-signed certificates.
+For MySQL and MariaDB, the options after `?` are
+[go-sql-driver/mysql's](https://github.com/go-sql-driver/mysql#parameters)
+(`tls=true`, `timeout=5s`); a MySQL database is what other engines call a
+schema, so the explorer lists each database's tables, views, routines and
+triggers directly.
 
 Passwords are kept in the system keychain: Keychain on macOS, Credential
 Manager on Windows, the Secret Service (GNOME Keyring, KWallet) on Linux.
@@ -176,10 +291,38 @@ connection string without a password also works, when the driver finds one
 elsewhere: `~/.pgpass` or `PGPASSWORD` for PostgreSQL, Windows authentication
 for SQL Server.
 
-Mark a connection **read-only** in the same form. On PostgreSQL the server
-then refuses writes, and on SQLite the engine does. SQL Server has no
+Mark a connection **read-only** in the same form. On PostgreSQL and MySQL
+the server then refuses writes, DDL included, and on SQLite the engine does. SQL Server has no
 read-only session setting, so rimor refuses statements that write, `EXEC`
 included; for a hard guarantee, use a login without write permissions.
+
+### One-shot sessions
+
+To look at a database once, without adding it to your connections, give it
+on the command line:
+
+```sh
+rimor ./app.db
+rimor postgres://me@db.local/erp
+rimor -readonly sqlserver://sa@sql.local?database=erp
+rimor "host=db.local dbname=erp user=me"
+rimor mysql://me@db.local/shop
+```
+
+rimor recognises PostgreSQL, SQL Server and MySQL connection strings, in
+URL form or the driver's own (key=value, or `user@tcp(host)/db`), and SQLite
+files, which must exist. The connection comes
+first in the explorer, marked *temporary*, with a tab open on it; your saved
+connections are there too. Nothing about it is saved: not in
+`connections.json`, not in the keychain, and your session is neither
+restored nor saved, so your usual tabs are there the next time you start
+rimor without one. To keep the connection, press `e` on it and save it.
+`-readonly` works like the connection form's read-only option.
+
+Leave the password out: a password on the command line ends up in your
+shell history, and other users of the machine can see it in the process
+list. When the server asks for one, rimor asks you and keeps it in memory
+only. `~/.pgpass`, `PGPASSWORD` and Windows authentication work too.
 
 ## AI agents
 
@@ -244,8 +387,10 @@ still review and run every query.
 - When the agent's SQL may write (`UPDATE`, `DROP`, `EXEC` and the like), the
   reminder under it turns into a warning. For diagnostics, a read-only
   connection makes sure nothing can.
-- rimor shows only the first result set of a batch, so the agent runs one
-  query at a time.
+- A SQL Server batch can return several results: the agent sees each one's
+  columns and row count, reads any of them, and sees the batch's row counts
+  and errors. `PRINT` and `SET STATISTICS` output reach it only for a shared
+  tab, since they can carry data.
 
 Rows you share go to the agent's model provider, like everything the agent
 reads. It also reads your catalog, comments included. To turn agent access off, set `agent = false` in
@@ -330,10 +475,12 @@ first one straight away:
 | Object | Scripts |
 |---|---|
 | Table | select the first rows, count, insert, update or delete a row by its key, add a column, drop (commented out) |
-| View, materialized view | select the first rows, count, drop (commented out) |
+| View | select the first rows, count, change, drop (commented out) |
+| Materialized view | select the first rows, count, drop (commented out) |
 | Column | its most common values |
 | Foreign key | join the two tables; rows whose referenced row is missing |
-| Function, procedure | a call with a `NULL` for each parameter, named and typed |
+| Function, procedure | change; a call with a `NULL` for each parameter, named and typed |
+| Trigger (SQLite, MySQL) | change |
 | Sequence | its current value; restart |
 | Index | drop (commented out) |
 
@@ -354,7 +501,9 @@ and `esc` puts the tree back as it was.
 
 **Results:** `enter` opens the cell, `esc` stops fetching, the arrows or `hjkl` move, `pgup`/`pgdn` page, `g`/`G` jump to the
 first or last row, `home`/`end` to the first or last column, `y` copies the
-cell, `Y` copies the row.
+cell, `Y` copies the row, `e` exports the result. For a SQL Server batch with several results, `[`
+and `]` switch between them (the status shows `[2/3]`), and `m` shows the
+batch's messages; `y` there copies them.
 
 Outside the editor, `tab` cycles focus, `?` shows the keys and `q` quits. The mouse focuses panes
 and drags the borders between them; a double click on a border resets it.
@@ -392,6 +541,7 @@ icons = "plain"         # "auto", "nerd" or "plain"
 leader = "ctrl+b"
 result_memory_mb = 2048 # memory a query's rows may take
 script_rows = 50        # rows the explorer's select scripts take
+check_updates = false   # never ask GitHub for new releases
 agent = false           # no AI agent access (see AI agents)
 
 [keys]
@@ -404,22 +554,35 @@ results) are not remappable yet.
 
 ## Limitations
 
-- Statements are classified before they run: one starting with `SELECT`,
-  `WITH`, `EXEC`, `SHOW` and the like, or containing `RETURNING`/`OUTPUT`,
-  shows rows; anything else shows the rows affected. A mutating statement
-  never runs twice to find out.
+- On PostgreSQL and SQLite, statements are classified before they run: one
+  starting with `SELECT`, `WITH`, `SHOW` and the like, or containing
+  `RETURNING`, shows rows; anything else shows the rows affected. A mutating
+  statement never runs twice to find out. SQL Server batches are not
+  classified: the server reports what they produce, so `DECLARE …; SELECT …`
+  shows its rows and a batch that only writes shows the rows affected.
+  MySQL batches are not classified either: the first result with columns is
+  shown (`SET @x := 1; SELECT …` included), else the rows the last statement
+  affected.
 - On PostgreSQL a row-returning query must be a single statement; select it
-  to run one of several. SQL Server batches work, and the first result set
-  with columns is shown.
+  to run one of several. SQL Server batches return all their results.
+- Only the first result of a SQL Server batch can be edited.
+- MySQL and MariaDB results cannot be edited yet (see
+  [Editing data](#editing-data)). The explorer does not list MySQL events or
+  MariaDB sequences.
 - A result's rows stay in memory, up to `result_memory_mb` (512 MB by
-  default); fetching stops there and keeps what arrived. Spilling larger
+  default, shared by all the results of a batch); fetching stops there and
+  keeps what arrived, and a batch says it was not read to its end. Spilling larger
   results to disk is planned.
 - A schema counts as empty when the login sees no objects, user types or XML
   schema collections in it, so a schema whose objects you lack permission
   to see is hidden too. The note under the database says how many are
   hidden, and `.` shows them.
-- Copying uses the terminal's clipboard support (OSC 52), which
-  Terminal.app lacks and iTerm2 has off by default.
+- The clipboard goes through the terminal (OSC 52). Copying works in most
+  terminals, but not Terminal.app, and iTerm2 has it off by default; in tmux,
+  set `set-clipboard on`. `ctrl+v` asks the terminal for the clipboard:
+  kitty and Ghostty ask you first, Alacritty needs `osc52 = "CopyPaste"`,
+  and where the terminal does not answer, rimor pastes what it copied
+  itself. The terminal's own paste (`ctrl+shift+v`, `cmd+v`) always works.
 
 ## Releasing
 
@@ -451,12 +614,20 @@ is given:
 RIMOR_TEST_POSTGRES='postgres://postgres@localhost:5432/postgres?sslmode=disable' \
 RIMOR_TEST_POSTGRES_DB=warehouse \
 RIMOR_TEST_SQLSERVER='sqlserver://user:pass@host?database=db&TrustServerCertificate=true' \
+RIMOR_TEST_MYSQL='root:pass@tcp(127.0.0.1:33306)/rimor_test' \
+RIMOR_TEST_MARIADB='root:pass@tcp(127.0.0.1:33307)/rimor_test' \
 go test ./...
 ```
 
 `RIMOR_TEST_POSTGRES_DB` names a second database on the same server, for the
 tests that switch databases. The SQL Server tests only read data and use temp
-tables.
+tables. The MySQL and MariaDB tests create and drop databases named
+`rimor_*`; throwaway servers will do:
+
+```sh
+docker run -d --name rimor-mysql -e MYSQL_ROOT_PASSWORD=pass -e MYSQL_DATABASE=rimor_test -p 127.0.0.1:33306:3306 mysql:8.4
+docker run -d --name rimor-mariadb -e MARIADB_ROOT_PASSWORD=pass -e MARIADB_DATABASE=rimor_test -p 127.0.0.1:33307:3306 mariadb:11
+```
 
 | Package | Contents |
 |---|---|

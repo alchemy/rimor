@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -28,22 +29,55 @@ type run struct {
 	started time.Time
 	cancel  context.CancelFunc
 	running bool // executing; the result is not back yet
+	change  bool // applied the tab's change (see change.go)
 
 	res *db.Result
 	err *db.Error
 
-	grid grid
+	// A batch may return several results (see batch.go): the one shown,
+	// each one's view, and whether the messages are shown instead.
+	cur      int
+	views    map[int]*setView
+	messages bool
+	msgTop   int // first message line shown
+}
 
+// setView is what the results pane keeps for one result set.
+type setView struct {
+	grid grid
 	// Where the result comes from, found when a cell is first opened for
 	// editing; originErr is why it cannot be edited.
 	origin    *db.Origin
 	originErr error
 }
 
-// fetching reports whether rows are still arriving.
-func (r *run) fetching() bool {
-	return r.res != nil && r.res.Rows != nil && !r.res.Rows.Progress().Done
+// set is the result set shown, or nil.
+func (r *run) set() *db.RowSet {
+	if r.res == nil {
+		return nil
+	}
+	sets := r.res.Sets()
+	if len(sets) == 0 {
+		return nil
+	}
+	return sets[min(r.cur, len(sets)-1)]
 }
+
+// view is the shown result set's view.
+func (r *run) view() *setView {
+	if r.views == nil {
+		r.views = map[int]*setView{}
+	}
+	v := r.views[r.cur]
+	if v == nil {
+		v = &setView{}
+		r.views[r.cur] = v
+	}
+	return v
+}
+
+// fetching reports whether rows are still arriving.
+func (r *run) fetching() bool { return r.res != nil && r.res.Fetching() }
 
 // busy reports whether the run still uses the tab's session.
 func (r *run) busy() bool { return r != nil && (r.running || r.fetching()) }
@@ -66,10 +100,10 @@ type rowsMsg struct {
 const rowsRefresh = 80 * time.Millisecond
 
 // watchRows waits for the next batch of rows.
-func watchRows(t *tab, gen int, set *db.RowSet) tea.Cmd {
+func watchRows(t *tab, gen int, res *db.Result) tea.Cmd {
 	return func() tea.Msg {
-		<-set.Updated()
-		if !set.Progress().Done {
+		<-res.Updated()
+		if res.Fetching() {
 			time.Sleep(rowsRefresh) // batch redraws while rows pour in
 		}
 		return rowsMsg{t, gen}
@@ -77,8 +111,11 @@ func watchRows(t *tab, gen int, set *db.RowSet) tea.Cmd {
 }
 
 // Run executes the selection, or the whole tab, on the tab's session.
-func (q *QueryPane) Run(t *tab) tea.Cmd {
-	if t.run.busy() {
+func (q *QueryPane) Run(t *tab) tea.Cmd { return q.run(t, false) }
+
+// run is Run; force applies a change tab over someone else's change.
+func (q *QueryPane) run(t *tab, force bool) tea.Cmd {
+	if t.busy() {
 		return nil
 	}
 	q.notice = "" // such as the agent's reminder to review
@@ -97,21 +134,32 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 		q.notice = mutedStyle.Render("Nothing to run")
 		return nil
 	}
+	var change *db.Change
+	if t.change != nil && line == 0 && col == 0 && text == t.ed.Text() {
+		if reason := t.cannotChange(); reason != "" {
+			q.notice = errorStyle.Render(reason)
+			return nil
+		}
+		c := *t.change
+		change = &c
+	}
 
 	if t.session != nil && t.sessionCtx != t.ctx {
 		t.dropSession()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.runs++
-	t.run = &run{gen: t.runs, query: text, line: line, col: col, started: time.Now(), cancel: cancel, running: true}
+	t.run = &run{gen: t.runs, query: text, line: line, col: col, started: time.Now(), cancel: cancel, running: true, change: change != nil}
 	t.sessionCtx = t.ctx
 
 	gen, pool, database, session := t.runs, t.ctx.conn.pool, t.ctx.database, t.session
+	inTx := session != nil && t.tx.Open
 	cfg := t.ctx.conn.cfg()
 	opts := db.RunOptions{
 		MemoryLimit: q.memoryLimit, Cancel: cancel,
 		// SQL Server cannot make a session read-only; rimor checks instead.
 		CheckReadOnly: cfg.ReadOnly && cfg.Driver == db.SQLServer,
+		Driver:        cfg.Driver,
 	}
 	exec := func() tea.Msg {
 		for attempt := 0; ; attempt++ {
@@ -125,7 +173,17 @@ func (q *QueryPane) Run(t *tab) tea.Cmd {
 			}
 			// Run releases the context itself, when the statement or the
 			// fetch of its rows ends.
-			res, err := db.Run(ctx, session, text, opts)
+			var res *db.Result
+			var err error
+			if change != nil {
+				res, err = db.ApplyChange(ctx, session, *change, text, opts, force)
+			} else {
+				res, err = db.Run(ctx, session, text, opts)
+			}
+			if err != nil && inTx && db.IsConnLost(err) {
+				// A fresh session would run it outside the transaction.
+				return runDoneMsg{tab: t, gen: gen, err: fmt.Errorf("%w: %w", errTxLost, err), session: session}
+			}
 			if err != nil && attempt == 0 && db.IsConnLost(err) {
 				go pool.Release(session) // the connection went away; retry on a fresh one
 				session = nil
@@ -171,35 +229,38 @@ func (q *QueryPane) finish(msg runDoneMsg) tea.Cmd {
 	if msg.err != nil {
 		e := db.Describe(msg.err)
 		r.err = &e
+		if errors.As(msg.err, new(*db.ChangedError)) {
+			r.change = false // nothing was applied
+		}
 		if db.IsConnLost(msg.err) {
 			t.dropSession()
 		}
 	}
 	t.releaseIfStale()
-	if r.res != nil && r.res.Rows != nil {
-		return watchRows(t, r.gen, r.res.Rows)
+	if r.res != nil && r.res.Fetching() {
+		return watchRows(t, r.gen, r.res)
 	}
-	return nil
+	return q.checkTx(t)
 }
 
 // rowsArrived handles a rowsMsg: keep watching until fetching ends.
 func (q *QueryPane) rowsArrived(msg rowsMsg) tea.Cmd {
 	t := msg.tab
 	r := t.run
-	if r == nil || r.gen != msg.gen || r.res == nil || r.res.Rows == nil {
+	if r == nil || r.gen != msg.gen || r.res == nil {
 		return nil
 	}
-	set := r.res.Rows
-	p := set.Progress()
-	if !p.Done {
-		return watchRows(t, r.gen, set)
+	if r.res.Fetching() {
+		return watchRows(t, r.gen, r.res)
 	}
-	if p.Err != nil && p.Rows == 0 {
-		e := db.Describe(p.Err) // failed before any row: show it as an error
+	// Failed before any row: show it as an error. The results and messages
+	// of a batch stay one key away.
+	if err := firstErrorWithoutRows(r.res); err != nil {
+		e := db.Describe(err)
 		r.err = &e
 	}
 	t.releaseIfStale()
-	return nil
+	return q.checkTx(t)
 }
 
 // releaseIfStale drops the session once the run is over if the tab was
@@ -220,7 +281,7 @@ func (t *tab) cancelRun() bool {
 		t.run.cancel()
 		return true
 	case t.run.fetching():
-		t.run.res.Rows.Stop()
+		t.run.res.Stop()
 		return true
 	}
 	return false
@@ -233,10 +294,11 @@ func (t *tab) dropSession() {
 		return
 	}
 	s := t.session
+	t.tx = db.TxState{} // closing rolls it back
 	if conn := t.sessionCtx.conn; conn != nil {
 		go conn.pool.Release(s)
 	} else {
-		go s.Close()
+		go db.CloseSession(s)
 	}
 	t.session = nil
 }
@@ -262,12 +324,32 @@ func (rp *ResultsPane) Update(msg tea.KeyPressMsg, t *tab) tea.Cmd {
 		return nil
 	}
 	r := t.run
-	if r.res == nil || !r.res.HasRows() {
+	if r.res == nil {
 		return nil
 	}
-	g, set := &r.grid, r.res.Rows
-	n, cols := set.Len(), len(set.Columns())
 	page := max(rp.height-3, 1)
+	switch msg.String() {
+	case "m":
+		if msgs, _ := runMessages(r); len(msgs) > 0 {
+			r.messages = !r.messages
+		}
+		return nil
+	case "]":
+		r.switchSet(1)
+		return nil
+	case "[":
+		r.switchSet(-1)
+		return nil
+	}
+	if r.messages {
+		return rp.messagesKey(msg, r, page)
+	}
+	set := r.set()
+	if set == nil {
+		return nil
+	}
+	g := &r.view().grid
+	n, cols := set.Len(), len(set.Columns())
 	switch msg.String() {
 	case "up", "k":
 		g.row--
@@ -298,6 +380,8 @@ func (rp *ResultsPane) Update(msg tea.KeyPressMsg, t *tab) tea.Cmd {
 			row, col := g.row, g.col
 			return func() tea.Msg { return openCellMsg{t, row, col} }
 		}
+	case "e":
+		return func() tea.Msg { return exportRequestMsg{t} }
 	case "Y":
 		if g.row < n {
 			cells := make([]string, cols)
@@ -322,16 +406,23 @@ func (rp *ResultsPane) View(t *tab, spin string, focused bool) string {
 		elapsed := time.Since(r.started).Truncate(100 * time.Millisecond)
 		return rp.center(accentStyle.Render(spin) + " " + textStyle.Render("Running") +
 			mutedStyle.Render("  "+elapsed.String()) + "\n\n" + hints("esc", "cancel"))
+	case r.messages:
+		return rp.messagesView(r)
 	case r.err != nil:
 		return rp.errorView(r)
-	case r.res.HasRows():
-		return r.grid.render(r.res.Rows, rp.width, rp.height, focused)
-	case r.res.HasAffected:
+	case r.set() != nil:
+		return r.view().grid.render(r.set(), rp.width, rp.height, focused)
+	}
+	more := ""
+	if msgs, _ := runMessages(r); len(msgs) > 0 {
+		more = "\n\n" + hints("m", "messages")
+	}
+	if r.res.HasAffected {
 		return rp.center(okStyle.Render("✓ ") + textStyle.Bold(true).Render(plural(r.res.RowsAffected, "row")+" affected") +
-			"\n\n" + mutedStyle.Render(formatDuration(r.res.Duration)))
+			"\n\n" + mutedStyle.Render(formatDuration(r.res.Duration)) + more)
 	}
 	return rp.center(okStyle.Render("✓ ") + textStyle.Bold(true).Render("Statement executed") +
-		"\n\n" + mutedStyle.Render(formatDuration(r.res.Duration)))
+		"\n\n" + mutedStyle.Render(formatDuration(r.res.Duration)) + more)
 }
 
 func (rp *ResultsPane) center(s string) string {
@@ -350,16 +441,23 @@ func (rp *ResultsPane) Status(t *tab, spin string) string {
 		return accentStyle.Render(spin) + mutedStyle.Render(" running")
 	case r.err != nil:
 		return errorStyle.Render("✗ failed")
-	case !r.res.HasRows():
-		return okStyle.Render("✓ ") + mutedStyle.Render(formatDuration(r.res.Duration))
+	case r.set() == nil:
+		return okStyle.Render("✓ ") + mutedStyle.Render(formatDuration(r.res.Duration)) + batchStatus(r)
 	}
 
-	p := r.res.Rows.Progress()
+	which := ""
+	if n := len(r.res.Sets()); n > 1 {
+		which = accentStyle.Render(fmt.Sprintf("[%d/%d]", r.cur+1, n)) + " " // result, not row: [ and ] switch
+	}
+	p := r.set().Progress()
 	rows := textStyle.Render(plural(int64(p.Rows), "row"))
 	if !p.Done {
-		return accentStyle.Render(spin+" ") + rows + mutedStyle.Render(" · fetching")
+		return which + accentStyle.Render(spin+" ") + rows + mutedStyle.Render(" · fetching")
 	}
-	s := okStyle.Render("✓ ") + rows
+	if r.res.Fetching() {
+		return which + okStyle.Render("✓ ") + rows + accentStyle.Render(" "+spin) + mutedStyle.Render(" reading the batch")
+	}
+	s := which + okStyle.Render("✓ ") + rows
 	switch {
 	case p.Err != nil:
 		s = errorStyle.Render("✗ ") + rows + errorStyle.Render(" · "+firstLine(db.Describe(p.Err).Message))
@@ -368,19 +466,24 @@ func (rp *ResultsPane) Status(t *tab, spin string) string {
 	case p.Stopped == db.StopCancelled:
 		s += mutedStyle.Render(" · stopped")
 	}
-	return s + mutedStyle.Render(" · "+formatDuration(r.res.Duration+p.Elapsed))
+	return s + mutedStyle.Render(" · "+formatDuration(r.res.Duration+p.Elapsed)) + batchStatus(r)
 }
 
 // Footer shows the cell position and the current column's type.
 func (rp *ResultsPane) Footer(t *tab, focused bool) string {
-	if t == nil || t.run == nil || t.run.running || t.run.res == nil || !t.run.res.HasRows() {
+	if t == nil || t.run == nil || t.run.running || t.run.res == nil {
 		return ""
 	}
-	g, set := &t.run.grid, t.run.res.Rows
+	r := t.run
+	if r.messages || r.set() == nil || r.err != nil {
+		return batchHints(r, focused)
+	}
+	g, set := &r.view().grid, r.set()
 	n := set.Len()
 	col := set.Columns()[g.col]
 	pos := fmt.Sprintf("%s/%s · %s", groupDigits(int64(min(g.row+1, n))), groupDigits(int64(n)), col.Name)
-	if col.Type != "" {
+	// The type, unless the batch's keys need the room.
+	if col.Type != "" && batchHints(r, focused) == "" {
 		pos += " " + strings.ToLower(col.Type)
 	}
 	s := mutedStyle.Render(pos)
@@ -389,6 +492,8 @@ func (rp *ResultsPane) Footer(t *tab, focused bool) string {
 		s += "  " + hints("esc", "stop")
 	case rp.notice != "":
 		s += "  " + rp.notice
+	case batchHints(r, focused) != "":
+		s += "  " + batchHints(r, focused)
 	case focused:
 		s += "  " + hints("⏎", "open", "y", "copy")
 	}

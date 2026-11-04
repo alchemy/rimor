@@ -127,7 +127,8 @@ func (ms sqlserver) describe(ctx context.Context, conn *sql.DB, schema, name str
 	return t, err
 }
 
-func (sqlserver) search(ctx context.Context, conn *sql.DB, pattern string, limit int) ([]Match, error) {
+func (sqlserver) search(ctx context.Context, conn *sql.DB, text string, limit int) ([]Match, error) {
+	pattern := likePattern(text)
 	return queryMatches(ctx, conn, `
 		SELECT TOP (@p2) kind, sch, name, col, typ FROM (
 		    SELECT CASE RTRIM(o.type) WHEN 'U' THEN 'table' WHEN 'V' THEN 'view'

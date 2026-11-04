@@ -97,7 +97,7 @@ func (p *Pool) Close() {
 	for s := range p.sessions {
 		// Closing waits for the session's open rows; the UI stops fetches
 		// first, but never block on one that is still winding down.
-		go s.Close()
+		go CloseSession(s)
 		delete(p.sessions, s)
 	}
 	for name, conn := range p.dbs {

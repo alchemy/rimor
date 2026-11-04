@@ -81,6 +81,10 @@ func (m *Model) openScript(msg openScriptMsg) {
 	t.name = agentTitle(msg.title+"."+msg.script.Name, q.tabs)
 	t.ed.SetText(msg.script.SQL)
 	t.saved = t.ed.Version()
+	if c := msg.script.Change; c != nil {
+		change := *c
+		t.change = &change
+	}
 	if cur := q.current(); cur != nil && cur.path == "" && !cur.dirty() && cur.ed.Text() == "" {
 		cur.close()
 		q.tabs[q.active] = t
@@ -91,7 +95,9 @@ func (m *Model) openScript(msg openScriptMsg) {
 	m.modal = nil
 	m.setFocus(focusQuery)
 	note := "Opened " + msg.script.Title
-	if msg.script.Writes {
+	if msg.script.Change != nil {
+		m.query.notice = errorStyle.Render("⚠ "+note) + mutedStyle.Render(" · running the whole tab changes it, with "+q.runKey)
+	} else if msg.script.Writes {
 		m.query.notice = errorStyle.Render("⚠ "+note+": it writes") + mutedStyle.Render(" · review it, then "+q.runKey)
 	} else {
 		m.query.notice = mutedStyle.Render(note + " · " + q.runKey + " runs it")

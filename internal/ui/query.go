@@ -33,6 +33,8 @@ func (c queryContext) language() editor.Language {
 		return editor.PostgreSQL
 	case db.SQLServer:
 		return editor.TSQL
+	case db.MySQL:
+		return editor.MySQL
 	}
 	return editor.SQL
 }
@@ -72,6 +74,16 @@ type tab struct {
 	// wantResults records that the agent asked. Neither is saved.
 	shareResults, wantResults bool
 
+	// tx is the session's transaction, as checked after the last run;
+	// txChecking while that check runs (see tx.go).
+	tx         db.TxState
+	txChecking bool
+	// exporting while an export runs the statement again on the session.
+	exporting bool
+	// change is the object a change script changes when the whole tab runs
+	// (see change.go); nil for other tabs.
+	change *db.Change
+
 	// Statements run on a connection of their own, opened on first run.
 	session    *sql.Conn
 	sessionCtx queryContext // context the session belongs to
@@ -102,6 +114,7 @@ func (t *tab) setContext(ctx queryContext) {
 	}
 	t.ctx = ctx
 	t.shareResults = false // granted for the server it ran on
+	t.change = nil         // the object is on the old context's server
 	t.ed.SetLanguage(ctx.language())
 	if !t.cancelRun() {
 		t.dropSession() // a running statement drops it when it returns
@@ -303,6 +316,12 @@ func (q *QueryPane) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case runDoneMsg:
 		return q.finish(msg)
+	case txCheckedMsg:
+		q.txChecked(msg)
+		if msg.change {
+			q.changed(msg.tab, msg.definition, msg.definitionErr)
+		}
+		return nil
 	case rowsMsg:
 		return q.rowsArrived(msg)
 	case spinner.TickMsg:
@@ -333,11 +352,7 @@ func (q *QueryPane) Update(msg tea.Msg) tea.Cmd {
 	if isKey {
 		switch key.String() {
 		case "ctrl+w":
-			if t.dirty() {
-				return func() tea.Msg { return confirmCloseTabMsg{t} }
-			}
-			q.Close(t)
-			return nil
+			return func() tea.Msg { return closeTabRequestMsg{t} }
 		case "ctrl+s":
 			if t.path == "" {
 				return func() tea.Msg { return promptPathMsg{purpose: pathSaveAs, tab: t} }
@@ -452,6 +467,12 @@ func (q *QueryPane) Status() string {
 		return ""
 	}
 	s := t.ctx.render()
+	if note := changeMarker(t); note != "" {
+		s += mutedStyle.Render(" · ") + note
+	}
+	if note := txMarker(t); note != "" {
+		s += mutedStyle.Render(" · ") + note
+	}
 	ic := iconAgent.String()
 	switch {
 	case t.shareResults:
@@ -472,6 +493,10 @@ func (q *QueryPane) Footer(focused bool) string {
 		return ""
 	}
 	line, col := t.ed.CursorPosition()
+	run := "run"
+	if t.change != nil && t.ed.SelectedText() == "" {
+		run = "change the " + db.KindName(t.change.Kind)
+	}
 	return mutedStyle.Render(fmt.Sprintf("%d:%d", line+1, col+1)) + "  " +
-		hints(q.runKey, "run", "^e", "context", "^s", "save")
+		hints(q.runKey, run, "^e", "context", "^s", "save")
 }

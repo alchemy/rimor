@@ -6,9 +6,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -16,6 +19,7 @@ import (
 	"rimor.dev/internal/config"
 	"rimor.dev/internal/db"
 	"rimor.dev/internal/ui"
+	"rimor.dev/internal/update"
 )
 
 // version is set by release builds (-ldflags "-X main.version=v1.2.3").
@@ -33,6 +37,90 @@ func Version() string {
 	return "dev"
 }
 
+// goInstalled reports a binary built by go install, which records the
+// module version that release builds set themselves.
+func goInstalled() bool {
+	if version != "" || localBuild() {
+		return false
+	}
+	info, ok := debug.ReadBuildInfo()
+	return ok && info.Main.Version != "" && info.Main.Version != "(devel)"
+}
+
+// localBuild reports a binary built from a checkout: "dev", or, since Go
+// 1.24 stamps go build with the repository's tags, a version marked
+// +dirty. It never checks for updates.
+func localBuild() bool {
+	v := Version()
+	return v == "dev" || strings.HasSuffix(v, "+dirty")
+}
+
+// updatePath is where the last update check is kept, beside the session.
+func updatePath() string {
+	session, err := ui.DefaultSessionPath()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(session), "update.json")
+}
+
+// release describes a newer release for the UI.
+func release(s update.State, announce bool) ui.UpdateMsg {
+	msg := ui.UpdateMsg{Latest: s.Latest, URL: s.URL, Announce: announce}
+	if goInstalled() {
+		// The version itself: the module proxy's answer for @latest is
+		// cached and can lag a new release by half an hour.
+		msg.Command = "go install rimor.dev/cmd/rimor@" + s.Latest
+	}
+	return msg
+}
+
+// checkUpdates shows what the last check found, and asks again in the
+// background whenever update.Interval has passed, at startup and while
+// rimor runs; failures are silent.
+func checkUpdates(m ui.Model, enabled bool) (ui.Model, func(p *tea.Program)) {
+	path := updatePath()
+	if !enabled || path == "" || update.Packaged() {
+		return m, nil
+	}
+	s := update.Load(path)
+	if update.Newer(Version(), s.Latest) {
+		announce := s.Notified != s.Latest
+		m = m.WithUpdate(release(s, announce))
+		if announce {
+			s.Notified = s.Latest
+			_ = s.Save(path)
+		}
+	}
+	if localBuild() {
+		return m, nil
+	}
+	return m, func(p *tea.Program) {
+		for {
+			// Reloaded each time: another rimor window may have asked.
+			s := update.Load(path)
+			if wait := s.Wait(time.Now()); wait > 0 {
+				time.Sleep(wait)
+				continue
+			}
+			checked, err := update.Check(context.Background(), http.DefaultClient, Version(), s, time.Now())
+			if err != nil {
+				time.Sleep(update.RetryAfter)
+				continue
+			}
+			newer := update.Newer(Version(), checked.Latest)
+			announce := newer && checked.Notified != checked.Latest
+			if announce {
+				checked.Notified = checked.Latest
+			}
+			_ = checked.Save(path)
+			if newer {
+				p.Send(release(checked, announce))
+			}
+		}
+	}
+}
+
 func main() {
 	// rimor mcp: the MCP server an AI agent starts, which talks to the
 	// rimor the user has open.
@@ -45,22 +133,59 @@ func main() {
 	}
 
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	readOnly := flag.Bool("readonly", false, "with a connection: refuse writes, as a read-only saved connection does")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "rimor %s, a terminal workbench for SQL databases\n\n"+
-			"Usage:\n  rimor [-version]\n  rimor mcp    MCP server for AI agents, on stdin and stdout\n", Version())
+		out := flag.CommandLine.Output()
+		fmt.Fprintf(out, "rimor %s, a terminal workbench for SQL databases\n\n"+
+			"Usage:\n"+
+			"  rimor                     your saved connections and tabs\n"+
+			"  rimor [-readonly] TARGET  a one-shot session on TARGET, saved nowhere\n"+
+			"  rimor mcp                 MCP server for AI agents, on stdin and stdout\n"+
+			"  rimor -version\n\n"+
+			"TARGET is a connection string or an SQLite file:\n"+
+			"  postgres://user@host/db   host=… dbname=… user=…\n"+
+			"  sqlserver://user@host?database=db   server=…;database=…;user id=…\n"+
+			"  mysql://user@host/db      user@tcp(host:3306)/db\n"+
+			"  ./app.db\n"+
+			"Leave the password out: rimor asks for it, and keeps it in memory only.\n", Version())
 	}
 	flag.Parse()
 	if *showVersion {
-		fmt.Println("rimor", Version())
+		line := "rimor " + Version()
+		if path := updatePath(); path != "" {
+			if s := update.Load(path); update.Newer(Version(), s.Latest) {
+				line += " (" + s.Latest + " is out: " + s.URL + ")"
+			}
+		}
+		fmt.Println(line)
 		return
 	}
-	if err := run(); err != nil {
+	var temp *db.Config
+	switch args := flag.Args(); {
+	case len(args) > 1:
+		fmt.Fprintln(os.Stderr, "rimor: one connection at a time; see rimor -h")
+		os.Exit(2)
+	case len(args) == 1:
+		cfg, err := db.ParseTarget(args[0])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "rimor:", err)
+			os.Exit(2)
+		}
+		cfg.ReadOnly = *readOnly
+		temp = &cfg
+	case *readOnly:
+		fmt.Fprintln(os.Stderr, "rimor: -readonly goes with a connection, e.g. rimor -readonly postgres://me@host/db")
+		os.Exit(2)
+	}
+	if err := run(temp); err != nil {
 		fmt.Fprintln(os.Stderr, "rimor:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// run starts the UI: on the saved connections and session, or, with temp,
+// a one-shot session on it that saves no session.
+func run(temp *db.Config) error {
 	store, err := db.DefaultStore()
 	if err != nil {
 		return err
@@ -76,11 +201,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if temp != nil {
+		sessionPath = "" // neither restored nor saved: the usual tabs stay as they are
+	}
 	// Passwords saved before keychain support move there now.
 	moved := store.MoveToKeychain()
 	m := ui.New(store, sessionPath, settings)
 	if moved != nil {
 		m = m.WithStoreError(moved)
+	}
+	if temp != nil {
+		m = m.WithTemporary(*temp)
 	}
 	var srv *agent.Server
 	if settings.Agent {
@@ -92,9 +223,13 @@ func run() error {
 			m = m.WithAgentSocket(srv.Path(), Version())
 		}
 	}
+	m, check := checkUpdates(m, settings.CheckUpdates)
 	p := tea.NewProgram(m)
 	if srv != nil {
 		go srv.Serve(forward(p))
+	}
+	if check != nil {
+		go check(p)
 	}
 	final, err := p.Run()
 	if m, ok := final.(ui.Model); ok {

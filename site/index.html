@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rimor, a terminal workbench for SQL databases</title>
-<meta name="description" content="Browse the catalog, write SQL in tabs and scroll through millions of rows, in your terminal. For PostgreSQL, SQL Server and SQLite.">
+<meta name="description" content="Browse the catalog, write SQL in tabs and scroll through millions of rows, in your terminal. For PostgreSQL, MySQL and MariaDB, SQL Server and SQLite.">
 <meta name="go-import" content="rimor.dev git https://github.com/alchemy/rimor">
 <meta name="go-source" content="rimor.dev https://github.com/alchemy/rimor https://github.com/alchemy/rimor/tree/master{/dir} https://github.com/alchemy/rimor/blob/master{/dir}/{file}#L{line}">
 <meta property="og:title" content="rimor">
-<meta property="og:description" content="A terminal workbench for PostgreSQL, SQL Server and SQLite.">
+<meta property="og:description" content="A terminal workbench for PostgreSQL, MySQL, SQL Server and SQLite.">
 <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#fcfcfc" media="(prefers-color-scheme: light)">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23000000'/%3E%3Cpath d='M3 4h10v8H3z' fill='none' stroke='%23ffffff' stroke-width='1.4'/%3E%3Cpath d='M3 7h10' stroke='%23ffffff' stroke-width='1.4'/%3E%3C/svg%3E">
@@ -209,7 +209,7 @@ pre.block {
   font-size: .875rem; line-height: 1.6;
   overflow-x: auto;
 }
-.prompt { color: var(--muted); }
+.prompt, .comment { color: var(--muted); }
 .after { margin-top: 2rem; max-width: 40rem; color: var(--sub); }
 
 footer.wrap {
@@ -251,7 +251,7 @@ footer.wrap {
       <p class="gloss">Latin: I probe, I search thoroughly.</p>
     </div>
     <div>
-      <p class="lede">A terminal workbench for PostgreSQL, SQL&nbsp;Server and SQLite.
+      <p class="lede">A terminal workbench for PostgreSQL, MySQL, SQL&nbsp;Server and SQLite.
         Browse the catalog, write SQL in tabs and scroll through millions of
         rows without leaving the keyboard.</p>
       <div class="install">
@@ -345,7 +345,7 @@ footer.wrap {
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
 <span style="color:#928374">│</span>                          <span style="color:#928374">│</span><span style="color:#b16286">│</span>                                                                                  <span style="color:#b16286">│</span>
-<span style="color:#928374">╰</span><span style="color:#928374">─────────────────────────</span><span style="color:#928374">─╯</span><span style="color:#b16286">╰</span><span style="color:#b16286">─</span> <span style="color:#98971a">✓ </span>6 rows<span style="color:#938a74"> · 1 ms</span> <span style="color:#b16286">─────────────────────────────</span> <span style="color:#938a74">2/6 · city text</span>  ⏎<span style="color:#938a74"> open</span><span style="color:#938a74"> · </span>y<span style="color:#938a74"> copy</span> <span style="color:#b16286">─╯</span><!-- /screen:terminal --></pre>
+<span style="color:#928374">╰</span><span style="color:#928374">─────────────────────────</span><span style="color:#928374">─╯</span><span style="color:#b16286">╰</span><span style="color:#b16286">─</span> <span style="color:#98971a">✓ </span>6 rows<span style="color:#938a74"> · &lt;1 ms</span> <span style="color:#b16286">────────────────────────────</span> <span style="color:#938a74">2/6 · city text</span>  ⏎<span style="color:#938a74"> open</span><span style="color:#938a74"> · </span>y<span style="color:#938a74"> copy</span> <span style="color:#b16286">─╯</span><!-- /screen:terminal --></pre>
   </div>
   <div class="wrap themes">
     <fieldset>
@@ -372,8 +372,10 @@ footer.wrap {
         <dd>Each tab knows where it runs, a connection and a database, and shows
           it at the bottom. Open a tab from anything in the tree and it starts
           there. Each runs on its own connection, so <code>USE</code>, temp tables
-          and open transactions carry over. Tabs save to <code>.sql</code> files,
-          and unsaved work is still there the next time you start.</dd>
+          and open transactions carry over; a tab says when it is inside a
+          transaction, and closing it asks whether to commit or roll back. Tabs
+          save to <code>.sql</code> files, and unsaved work is still there the
+          next time you start.</dd>
       </div>
       <div>
         <dt>AI agents</dt>
@@ -391,7 +393,10 @@ footer.wrap {
           background, stored compactly enough for millions of them. Scroll by
           row and by column; <kbd>esc</kbd> stops fetching and keeps what
           arrived. A failure shows the database's own message and code, with
-          a caret where it points in your SQL.</dd>
+          a caret where it points in your SQL. A SQL Server batch keeps every
+          result and its messages: <code>PRINT</code>, statistics, row counts,
+          errors in place. <kbd>e</kbd> exports a result as CSV, JSON, SQL
+          <code>INSERT</code>s or Markdown, every row of it if you like.</dd>
       </div>
       <div>
         <dt>Editing</dt>
@@ -403,7 +408,7 @@ footer.wrap {
       <div>
         <dt>Read-only connections</dt>
         <dd>Mark a connection read-only and writes are refused: by the server
-          on PostgreSQL, by the engine on SQLite, by rimor on SQL Server.</dd>
+          on PostgreSQL and MySQL, by the engine on SQLite, by rimor on SQL Server.</dd>
       </div>
       <div>
         <dt>Editor</dt>
@@ -415,7 +420,10 @@ footer.wrap {
         <dd>Press <kbd>s</kbd> on a table, view, column or routine for ready-made
           SQL in its own dialect: the first rows, an insert or update to fill in,
           a call with every parameter. It opens in a new tab and runs when you
-          run it; until you fill it in, it changes nothing.</dd>
+          run it; until you fill it in, it changes nothing. A procedure, view or
+          trigger opens as its definition: edit it, run the tab, and rimor
+          applies it the way the engine allows, without overwriting someone
+          else's change.</dd>
       </div>
       <div>
         <dt>Themes</dt>
@@ -436,23 +444,30 @@ footer.wrap {
     <h2 id="install">Install</h2>
     <div class="columns">
       <div>
-        <h3>With Go</h3>
+        <h3>Download</h3>
         <p>A single binary with no other dependencies, for Linux, macOS and
-          Windows. Needs Go 1.27 or newer.</p>
-<pre class="block"><span class="prompt">$ </span>go install rimor.dev/cmd/rimor@latest
-<span class="prompt">$ </span>rimor</pre>
+          Windows on amd64 and arm64: get the archive for your system from
+          <a href="https://github.com/alchemy/rimor/releases/latest">the latest
+          release</a>. On Arch Linux it is in the AUR, built from source or
+          prebuilt.</p>
+<pre class="block"><span class="prompt">$ </span>yay -S rimor      <span class="comment"># or rimor-bin</span></pre>
       </div>
       <div>
-        <h3>From source</h3>
-        <p>Clone the repository and build the command; the binary lands in the
-          current folder.</p>
-<pre class="block"><span class="prompt">$ </span>git clone https://github.com/alchemy/rimor
+        <h3>With Go</h3>
+        <p>With Go 1.27 or newer, install it, or clone the repository and
+          build it; the binary lands in the current folder.</p>
+<pre class="block"><span class="prompt">$ </span>go install rimor.dev/cmd/rimor@latest
+<span class="prompt">$ </span>git clone https://github.com/alchemy/rimor
 <span class="prompt">$ </span>cd rimor &amp;&amp; go build ./cmd/rimor</pre>
       </div>
     </div>
-    <p class="after">Press <kbd>a</kbd> in the explorer to add a connection.
+    <p class="after">Press <kbd>a</kbd> in the explorer to add a connection,
+      or give one on the command line for a session that is saved nowhere:
+      <code>rimor ./app.db</code>, <code>rimor postgres://me@host/db</code>.
       Settings live in <code>~/.config/rimor/config.toml</code>, written with
-      every default on first run.</p>
+      every default on first run. Every few hours rimor asks GitHub whether a
+      newer release is out, and says so above the query;
+      <code>check_updates = false</code> turns that off.</p>
   </section>
 </main>
 

@@ -11,6 +11,7 @@ import (
 
 	"rimor.dev/internal/config"
 	"rimor.dev/internal/db"
+	"rimor.dev/internal/editor"
 )
 
 type focus int
@@ -50,6 +51,8 @@ type Model struct {
 	keys         keymap
 	help         *helpOverlay // the key help, over everything; nil when closed
 	waiters      []*runWaiter // agents waiting for a tab's run to end
+	startup      []tea.Cmd    // run by Init: loading a temporary connection
+	newRelease   *UpdateMsg   // a newer release, when one is out
 	leader       bool         // the leader key was pressed; the next key picks an action
 	leaderRepeat bool         // a resize step ran; further steps need no new leader
 
@@ -127,7 +130,9 @@ func (m Model) saveSession() {
 
 // Init asks the terminal for its background colour, which "auto" uses to
 // choose dark or light and the terminal theme to shade the selection.
-func (m Model) Init() tea.Cmd { return tea.RequestBackgroundColor }
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(append([]tea.Cmd{tea.RequestBackgroundColor}, m.startup...)...)
+}
 
 // setFocus moves the focus. In full screen the newly focused pane takes
 // over the screen.
@@ -222,14 +227,21 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case saveConnectionMsg:
 		m.modal = nil
-		if msg.conn != nil {
-			m.query.StopConnection(msg.conn) // editing closes its sessions
+		if msg.conn == nil {
+			return m.update(saveConnNowMsg{msg})
 		}
-		m.explorer.Upsert(msg.conn, msg.cfg)
+		return m.guardTx(m.query.tabsOn(msg.conn), saveConnNowMsg{msg})
+	case saveConnNowMsg:
+		if msg.msg.conn != nil {
+			m.query.StopConnection(msg.msg.conn) // editing closes its sessions
+		}
+		m.explorer.Upsert(msg.msg.conn, msg.msg.cfg)
 		m.setFocus(focusExplorer)
 		return nil
 	case deleteConnectionMsg:
 		m.modal = nil
+		return m.guardTx(m.query.tabsOn(msg.conn), deleteConnNowMsg{msg.conn})
+	case deleteConnNowMsg:
 		m.query.StopConnection(msg.conn)
 		m.explorer.Remove(msg.conn)
 		m.query.ForgetConnection(msg.conn)
@@ -239,6 +251,16 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	// Tabs and files.
 	case confirmCloseTabMsg:
 		m.modal = confirmCloseTab{msg.tab}
+		return nil
+	case closeTabRequestMsg:
+		return m.guardTx([]*tab{msg.tab}, closeTabNowMsg{msg.tab})
+	case closeTabNowMsg:
+		if msg.tab.dirty() {
+			m.modal = confirmCloseTab{msg.tab}
+			return nil
+		}
+		m.query.Close(msg.tab)
+		m.saveSession()
 		return nil
 	case closeTabMsg:
 		m.modal = nil
@@ -266,14 +288,44 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.explorer.Expand(msg.conn)
 	case contextChosenMsg:
 		m.modal = nil
+		if msg.ctx == msg.tab.ctx {
+			return nil
+		}
+		return m.guardTx([]*tab{msg.tab}, applyContextMsg{msg.tab, msg.ctx})
+	case applyContextMsg:
 		msg.tab.setContext(msg.ctx)
 		m.saveSession()
 		return nil
+	case quitNowMsg:
+		return tea.Quit
+	case txEndedMsg:
+		return m.txEnded(msg)
+	case txCheckedMsg:
+		return m.query.Update(msg)
 
 	case AgentRequestMsg:
 		return m.agentRequest(msg)
 	case chatMsg:
 		return m.chat.Event(msg)
+	case loadedMsg:
+		cmd := m.explorer.Update(msg)
+		return tea.Batch(cmd, m.askPasswordIfRefused(msg))
+	case passwordChosenMsg:
+		return m.usePassword(msg)
+	case UpdateMsg:
+		return m.updateMsg(msg)
+	case exportRequestMsg:
+		if r := msg.tab.run; r == nil || r.set() == nil {
+			return nil
+		}
+		d, cmd := m.newExportDialog(msg.tab)
+		m.modal = d
+		return cmd
+	case exportOriginMsg:
+		m.exportOrigin(msg)
+		return nil
+	case exportDoneMsg:
+		return m.exportDone(msg)
 	case scriptsReadyMsg:
 		return m.scriptsReady(msg)
 	case openScriptMsg:
@@ -282,15 +334,23 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case runDoneMsg, rowsMsg:
 		cmd := m.query.Update(msg)
+		if done, ok := msg.(runDoneMsg); ok {
+			m.changeConflict(done)
+		}
 		m.checkWaiters()
 		return cmd
+	case changeForceMsg:
+		if msg.tab.closed {
+			return nil
+		}
+		return m.query.run(msg.tab, true)
 	case waitTimeoutMsg:
 		m.waitTimedOut(msg.w)
 		return nil
 
 	// The cell popup.
 	case openCellMsg:
-		if msg.tab.run == nil || msg.tab.run.res == nil || !msg.tab.run.res.HasRows() {
+		if msg.tab.run == nil || msg.tab.run.set() == nil {
 			return nil
 		}
 		p := newCellPopup(msg.tab, msg.row, msg.col, m.dialogWidth())
@@ -298,8 +358,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.modal = p
 		return m.prepareCell(p)
 	case cellReadyMsg:
-		if r := msg.popup.run; r.origin == nil && r.originErr == nil {
-			r.origin, r.originErr = msg.origin, msg.originErr // once per result
+		if v := msg.popup.view; v.origin == nil && v.originErr == nil {
+			v.origin, v.originErr = msg.origin, msg.originErr // once per result
 		}
 		if m.modal == msg.popup {
 			msg.popup.ready(msg)
@@ -316,13 +376,15 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		}
-		p.run.res.Rows.SetCell(p.row, p.col, msg.value)
+		p.set.SetCell(p.row, p.col, msg.value)
 		m.results.notice = okStyle.Render("✓ saved " + p.column.Name)
 		if m.modal == p {
 			m.modal = nil
 		}
 		return nil
 	case disconnectMsg:
+		return m.guardTx(m.query.tabsOn(msg.conn), disconnectNowMsg{msg.conn})
+	case disconnectNowMsg:
 		m.query.StopConnection(msg.conn)
 		m.explorer.disconnect(msg.conn)
 		return nil
@@ -346,6 +408,18 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.ClipboardMsg, editor.PasteTimeoutMsg:
+		// The terminal's clipboard, or the end of the wait for it: for the
+		// editor whose ctrl+v asked (the others ignore it).
+		if m.modal != nil {
+			var cmd tea.Cmd
+			m.modal, cmd = m.modal.Update(msg)
+			return cmd
+		}
+		if t := m.query.current(); t != nil {
+			return t.ed.Update(msg)
+		}
+		return nil
 	case tea.PasteMsg:
 		if m.modal != nil {
 			var cmd tea.Cmd
@@ -393,7 +467,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	action, bound := m.keys.direct[key]
 	if bound && action == "quit" {
-		return tea.Quit
+		return m.quit()
 	}
 	// The help overlay takes every key while open; the help key opens it
 	// from anywhere, a dialog included.
@@ -435,7 +509,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Panes without text input keep single-key shortcuts.
 	switch key {
 	case "q", "ctrl+c":
-		return tea.Quit
+		return m.quit()
 	case "tab":
 		m.setFocus((m.focus + 1) % focusCount)
 		return nil
@@ -541,6 +615,9 @@ func (m Model) renderPane(f focus, width, height int) string {
 		} else {
 			p.corner = mutedStyle.Render("full screen")
 		}
+	case f == focusQuery:
+		// A newer release, on the widest top border there is.
+		p.corner = m.updateCorner()
 	}
 
 	switch f {

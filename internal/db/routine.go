@@ -36,6 +36,8 @@ func (p *Pool) Routine(ctx context.Context, o Object) (*Routine, error) {
 		return pgRoutine(ctx, conn, o)
 	case SQLServer:
 		return mssqlRoutine(ctx, conn, o)
+	case MySQL:
+		return mysqlRoutine(ctx, conn, o)
 	}
 	return nil, fmt.Errorf("%s has no routines", p.cfg.Driver.Label())
 }

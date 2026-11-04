@@ -14,15 +14,15 @@ type Tool struct {
 
 // Instructions tell the agent what rimor is and how the tools fit
 // together; MCP clients add them to the agent's context.
-const Instructions = `rimor is the terminal SQL workbench the user has open, for PostgreSQL, SQL Server and SQLite. These tools read the catalog of the user's saved connections and put SQL in front of the user as query tabs.
+const Instructions = `rimor is the terminal SQL workbench the user has open, for PostgreSQL, MySQL and MariaDB, SQL Server and SQLite. These tools read the catalog of the user's saved connections and put SQL in front of the user as query tabs.
 
 You cannot execute SQL. open_query and update_query only write a tab; the user reviews it and runs it. Say so when you hand a query over, and do not claim to know its results.
 
-Typical use: list_connections to find the connection the user means (by its name), search_objects to find tables and columns by name, describe for the exact columns, keys and foreign keys before writing joins, then open_query. Write in the connection's dialect (PostgreSQL, T-SQL or SQLite). On a read-only connection writes will be refused, so offer the statement but say it cannot run there.
+Typical use: list_connections to find the connection the user means (by its name), search_objects to find tables and columns by name, describe for the exact columns, keys and foreign keys before writing joins, then open_query. Write in the connection's dialect (PostgreSQL, MySQL, T-SQL or SQLite). On a read-only connection writes will be refused, so offer the statement but say it cannot run there.
 
 After you hand a tab over, wait_for_run waits until the user has run it and reports how it went: failed and why, or which columns and how many rows. The rows themselves are private unless the user lets you read them for that tab (they press a key in rimor; pass want_results to ask). Then wait_for_run includes the first rows and read_results pages through the rest.
 
-For work that takes many queries, such as diagnosing a slow server, keep one tab and revise it with update_query for each step: the user reads it, runs it, and wait_for_run gives you the result. Put one statement that returns rows in each run: rimor shows only the first result set of a batch. Ask before anything that writes; the user is warned about SQL that may write.`
+For work that takes many queries, such as diagnosing a slow server, keep one tab and revise it with update_query for each step: the user reads it, runs it, and wait_for_run gives you the result. On SQL Server a batch may return several results: the outcome lists them ("results"), and read_results takes the result's number. It also lists the batch's messages: row counts and errors, and PRINT or SET STATISTICS output when the user shares the tab. Ask before anything that writes; the user is warned about SQL that may write.`
 
 // object is a JSON schema for an object with these properties, of which
 // required ones must be given.
@@ -48,7 +48,7 @@ var Tools = []Tool{
 	{
 		Name:  "list_connections",
 		Title: "List connections",
-		Description: "The user's saved database connections: name, driver (PostgreSQL, SQL Server, SQLite) and whether they are read-only. " +
+		Description: "The user's saved database connections: name, driver (PostgreSQL, MySQL, SQL Server, SQLite) and whether they are read-only. " +
 			"For a connection that is already open, also the server version. Hosts, users and passwords are never shown.",
 		InputSchema: object(map[string]any{}),
 		Annotations: readOnly,
@@ -60,6 +60,7 @@ var Tools = []Tool{
 			"With just a connection: its databases (and the server version). With a database: its schemas. " +
 			"With a schema: its tables, views, materialized views, functions, procedures and sequences, optionally only one kind. " +
 			"SQLite has neither databases nor schemas: the connection alone lists its tables, views, indexes and triggers. " +
+			"MySQL has databases but no schemas (a MySQL database is a schema): a database lists its tables, views, functions, procedures and triggers. " +
 			"Built-in schemas are left out; schemas with nothing in them are listed separately. For large databases search_objects is quicker.",
 		InputSchema: object(map[string]any{
 			"connection": str(connDesc),
@@ -90,7 +91,7 @@ var Tools = []Tool{
 		InputSchema: object(map[string]any{
 			"connection": str(connDesc),
 			"database":   str(dbDesc),
-			"schema":     str("Schema of the table; omit for the default one (public, dbo). Ignored for SQLite."),
+			"schema":     str("Schema of the table; omit for the default one (public, dbo). On MySQL, the database; ignored for SQLite."),
 			"name":       str("Table or view name, unquoted."),
 		}, "connection", "name"),
 		Annotations: readOnly,
@@ -129,7 +130,7 @@ var Tools = []Tool{
 		Name:  "list_tabs",
 		Title: "List query tabs",
 		Description: "The open query tabs: id, title, connection and database, whether you opened it, which one the user is looking at, " +
-			"and whether you may read its results.",
+			"whether you may read its results, and the procedure, function, view or trigger it changes when the user opened its definition to edit (running it applies the edit).",
 		InputSchema: object(map[string]any{}),
 		Annotations: readOnly,
 	},
@@ -138,6 +139,7 @@ var Tools = []Tool{
 		Title: "Read a query tab",
 		Description: "A tab's SQL and context, the text the user has selected in it, and the outcome of its last run: " +
 			"running, failed (with the database's message and code, and where in the SQL), or done (columns, row count, rows affected). " +
+			"For a SQL Server batch, every result's columns and row count, and its messages. " +
 			"Result rows are never included: see read_results. Without tab, the tab the user is looking at.",
 		InputSchema: object(map[string]any{
 			"tab": map[string]any{"type": "integer", "description": "Tab id; omit for the current tab."},
@@ -164,6 +166,7 @@ var Tools = []Tool{
 			"cells over 1 KB are cut and end in …. next_offset, when present, is where the next page starts; it is also present while rows are still arriving.",
 		InputSchema: object(map[string]any{
 			"tab":    map[string]any{"type": "integer", "description": "Tab id; omit for the current tab."},
+			"result": map[string]any{"type": "integer", "minimum": 1, "description": "Which result of a batch, from 1; default 1."},
 			"offset": map[string]any{"type": "integer", "minimum": 0, "description": "First row, from 0."},
 			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "description": "Rows to return; default 100."},
 		}),

@@ -23,6 +23,13 @@ const loadTimeout = 20 * time.Second
 // across edits.
 type connection struct {
 	pool *db.Pool
+	// temporary marks a connection given on the command line: never
+	// saved, until the user saves it from the connection form.
+	temporary bool
+	// askPassword: it came without a password, so a refused login asks
+	// for one (see oneshot.go), added to bareDSN.
+	askPassword bool
+	bareDSN     string
 }
 
 func newConnection(cfg db.Config) *connection {
@@ -460,6 +467,19 @@ func (e *Explorer) disconnect(conn *connection) {
 	e.scroll()
 }
 
+// AddTemporary puts a connection given on the command line first, opens
+// it, and selects it. It is not saved.
+func (e *Explorer) AddTemporary(cfg db.Config) (*connection, tea.Cmd) {
+	conn := newConnection(cfg)
+	conn.temporary = true
+	r := &node{conn: conn, root: true}
+	e.roots = append([]*node{r}, e.roots...)
+	e.cursor = r
+	cmd := e.load(r)
+	e.scroll()
+	return conn, cmd
+}
+
 // Upsert saves a new connection (conn == nil) or replaces an existing one.
 func (e *Explorer) Upsert(conn *connection, cfg db.Config) {
 	if conn == nil {
@@ -468,6 +488,7 @@ func (e *Explorer) Upsert(conn *connection, cfg db.Config) {
 		e.cursor = r
 	} else if r := e.rootOf(conn); r != nil {
 		conn.setConfig(cfg)
+		conn.temporary, conn.askPassword = false, false // saving a temporary connection keeps it
 		r.reset()
 		e.cursor = r
 	}
@@ -508,9 +529,11 @@ func (e *Explorer) Names() []string {
 }
 
 func (e *Explorer) save() {
-	cfgs := make([]db.Config, len(e.roots))
-	for i, r := range e.roots {
-		cfgs[i] = r.conn.cfg()
+	cfgs := make([]db.Config, 0, len(e.roots))
+	for _, r := range e.roots {
+		if !r.conn.temporary {
+			cfgs = append(cfgs, r.conn.cfg())
+		}
 	}
 	e.notice = storeNotice(e.store.Save(cfgs))
 }
@@ -764,6 +787,9 @@ func (e *Explorer) renderLine(l line, current, focused bool) string {
 			name, detail = cfg.Name, cfg.Driver.Short()
 			if cfg.ReadOnly {
 				detail += " · read-only"
+			}
+			if n.conn.temporary {
+				detail = "temporary · " + detail // first: narrow panes cut the end
 			}
 			nameStyle = nameStyle.Bold(true)
 		} else {

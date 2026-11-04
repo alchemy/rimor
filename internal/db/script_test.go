@@ -34,6 +34,9 @@ func prepare(t *testing.T, conn *sql.DB, scripts map[string]Script) {
 			}
 			continue
 		}
+		if s.Change != nil {
+			continue // applied by ApplyChange: see change_test.go
+		}
 		stmt, err := conn.Prepare(s.SQL)
 		if err != nil {
 			t.Errorf("%s does not prepare: %v\n%s", name, err, s.SQL)
@@ -116,7 +119,7 @@ func TestScriptsSQLite(t *testing.T) {
 
 	view := scriptsFor(t, p, Object{Kind: KindView, Name: "late_orders"})
 	prepare(t, conn, view)
-	if len(view) != 3 {
+	if len(view) != 4 || view["change"].Change == nil {
 		t.Errorf("view scripts: %v", view)
 	}
 

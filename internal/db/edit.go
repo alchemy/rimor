@@ -39,7 +39,9 @@ type Origin struct {
 	// Readable name of the table and of each source column, for messages
 	// and the statement preview.
 	Table string
-	names []string
+	// The table's schema and name, apart (see SQLTable).
+	schema, name string
+	names        []string
 	// fixed marks source columns the database computes (generated,
 	// computed or identity columns).
 	fixed []bool
@@ -127,9 +129,10 @@ func describePostgres(ctx context.Context, conn *sql.Conn, query string, columns
 	o := newOrigin(Postgres, columns)
 	var kind string
 	if err := conn.QueryRowContext(ctx, `
-		SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname), n.nspname || '.' || c.relname, c.relkind::text
+		SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname), n.nspname || '.' || c.relname,
+		       n.nspname, c.relname, c.relkind::text
 		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = $1`, table,
-	).Scan(&o.table, &o.Table, &kind); err != nil {
+	).Scan(&o.table, &o.Table, &o.schema, &o.name, &kind); err != nil {
 		return nil, err
 	}
 	if kind != "r" && kind != "p" {
@@ -302,6 +305,7 @@ func describeSQLServer(ctx context.Context, conn *sql.Conn, query string, column
 		if o.table == "" {
 			o.table = mssqlQuote(c.db) + "." + mssqlQuote(c.schema) + "." + mssqlQuote(c.table)
 			o.Table = c.schema + "." + c.table
+			o.schema, o.name = c.schema, c.table
 		}
 		if c.key {
 			o.key = append(o.key, i)

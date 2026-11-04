@@ -119,6 +119,7 @@ func TestSelectionReplaceAndCut(t *testing.T) {
 		t.Fatalf("cut all = %q", got)
 	}
 	press(m, "ctrl+v")
+	m.Update(PasteTimeoutMsg{m.pasting}) // a terminal that does not answer
 	if got := m.Text(); got != "SELECT name FROM people" {
 		t.Fatalf("paste = %q", got)
 	}

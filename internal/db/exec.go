@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	mssql "github.com/microsoft/go-mssqldb"
 )
@@ -42,18 +43,33 @@ func (p *Pool) Session(ctx context.Context, database string) (*sql.Conn, error) 
 	return s, nil
 }
 
-// Release closes a session from Session.
+// Release ends a session from Session by closing its connection, which is
+// never returned to the pool: it may hold an open transaction, temp tables
+// or settings (SET, USE) that must not reach the pool's next user, and
+// closing makes the server roll back the transaction at once rather than
+// when the connection is next reused (or, with SQLite, not at all).
 func (p *Pool) Release(s *sql.Conn) {
 	p.mu.Lock()
 	delete(p.sessions, s)
 	p.mu.Unlock()
-	s.Close()
+	CloseSession(s)
+}
+
+// CloseSession closes a session's connection instead of pooling it:
+// database/sql closes a connection when Raw's function reports it bad.
+// It waits for the session's open rows, like Close.
+func CloseSession(s *sql.Conn) {
+	err := s.Raw(func(any) error { return driver.ErrBadConn })
+	if err != nil && !errors.Is(err, driver.ErrBadConn) && !errors.Is(err, sql.ErrConnDone) {
+		s.Close()
+	}
 }
 
 // IsConnLost reports whether an error means the session's connection is
 // gone and the statement never ran, so a fresh session may retry it.
 func IsConnLost(err error) bool {
 	return errors.Is(err, sql.ErrConnDone) || errors.Is(err, driver.ErrBadConn) ||
+		errors.Is(err, mysql.ErrInvalidConn) ||
 		(err != nil && strings.Contains(err.Error(), "database is closed"))
 }
 
@@ -83,10 +99,58 @@ type Result struct {
 	// Duration is the time until the statement returned: its first rows,
 	// for queries.
 	Duration time.Duration
+
+	// Batch, for SQL Server, holds every result set of the batch (Rows is
+	// the first) and its messages; nil elsewhere.
+	Batch *Batch
 }
 
 // HasRows reports whether the statement produced a result set.
 func (r *Result) HasRows() bool { return r.Rows != nil }
+
+// Sets are the result sets so far: the batch's, or the one there is.
+func (r *Result) Sets() []*RowSet {
+	switch {
+	case r.Batch != nil:
+		return r.Batch.Sets()
+	case r.Rows != nil:
+		return []*RowSet{r.Rows}
+	}
+	return nil
+}
+
+// Fetching reports whether rows or messages are still arriving.
+func (r *Result) Fetching() bool {
+	switch {
+	case r.Batch != nil:
+		return !r.Batch.Done()
+	case r.Rows != nil:
+		return !r.Rows.Progress().Done
+	}
+	return false
+}
+
+// Stop ends fetching, keeping what arrived.
+func (r *Result) Stop() {
+	switch {
+	case r.Batch != nil:
+		r.Batch.Stop()
+	case r.Rows != nil:
+		r.Rows.Stop()
+	}
+}
+
+// Updated is signalled while rows (or, for a batch, results and messages)
+// arrive and when they end; nil when nothing is fetched.
+func (r *Result) Updated() <-chan struct{} {
+	switch {
+	case r.Batch != nil:
+		return r.Batch.Updated()
+	case r.Rows != nil:
+		return r.Rows.Updated()
+	}
+	return nil
+}
 
 // RunOptions control a statement's execution.
 type RunOptions struct {
@@ -99,6 +163,9 @@ type RunOptions struct {
 	// CheckReadOnly refuses statements that may write (see CheckReadOnly),
 	// for read-only connections whose database cannot enforce it.
 	CheckReadOnly bool
+	// Driver picks how the batch runs: SQL Server batches report what they
+	// produce (see runMSSQL); the others are classified by their first word.
+	Driver Driver
 }
 
 // rowKeywords start statements that return rows.
@@ -166,6 +233,26 @@ func Run(ctx context.Context, conn *sql.Conn, query string, opts RunOptions) (*R
 	}
 
 	start := time.Now()
+	if opts.Driver == MySQL {
+		res, err := runMySQL(ctx, conn, query, opts)
+		if res != nil {
+			res.Duration = time.Since(start)
+		}
+		if res == nil || res.Rows == nil {
+			opts.Cancel()
+		}
+		return res, err
+	}
+	if opts.Driver == SQLServer {
+		res, err := runMSSQL(ctx, conn, query, opts)
+		if res != nil {
+			res.Duration = time.Since(start)
+		}
+		if res == nil || res.Rows == nil {
+			opts.Cancel()
+		}
+		return res, err
+	}
 	res := &Result{}
 	var err error
 	if returnsRows(query) {
@@ -199,16 +286,7 @@ func startQuery(ctx context.Context, conn *sql.Conn, query string, opts RunOptio
 			return nil, err
 		}
 		if len(types) > 0 {
-			set := &RowSet{
-				columns: make([]Column, len(types)),
-				numeric: make([]bool, len(types)),
-				seen:    make([]bool, len(types)),
-				updated: make(chan struct{}, 1),
-				cancel:  opts.Cancel,
-			}
-			for i, t := range types {
-				set.columns[i] = Column{Name: t.Name(), Type: t.DatabaseTypeName()}
-			}
+			set := newRowSet(types, opts)
 			go set.fetch(ctx, rows, opts.MemoryLimit, opts.Cancel)
 			return set, nil
 		}
@@ -220,31 +298,72 @@ func startQuery(ctx context.Context, conn *sql.Conn, query string, opts RunOptio
 	}
 }
 
+// newRowSet makes the row set of a result with these columns.
+func newRowSet(types []*sql.ColumnType, opts RunOptions) *RowSet {
+	set := &RowSet{
+		columns: make([]Column, len(types)),
+		numeric: make([]bool, len(types)),
+		seen:    make([]bool, len(types)),
+		updated: make(chan struct{}, 1),
+		cancel:  opts.Cancel,
+	}
+	for i, t := range types {
+		set.columns[i] = Column{Name: t.Name(), Type: t.DatabaseTypeName()}
+	}
+	return set
+}
+
 func numericType(name string) bool {
-	switch strings.ToUpper(name) {
-	case "INT", "INT2", "INT4", "INT8", "INTEGER", "BIGINT", "SMALLINT", "TINYINT",
+	// MySQL names unsigned columns "UNSIGNED INT" and the like.
+	switch strings.TrimPrefix(strings.ToUpper(name), "UNSIGNED ") {
+	case "INT", "INT2", "INT4", "INT8", "INTEGER", "BIGINT", "SMALLINT", "TINYINT", "MEDIUMINT",
 		"NUMERIC", "DECIMAL", "FLOAT", "FLOAT4", "FLOAT8", "REAL", "DOUBLE",
-		"MONEY", "SMALLMONEY", "OID":
+		"MONEY", "SMALLMONEY", "OID", "BIT":
 		return true
 	}
 	return false
 }
 
-func formatValue(v any, typ string) Value {
+// hasControl reports bytes that are no text: control characters other than
+// tab and line breaks, as in binary values that happen to be valid UTF-8.
+func hasControl(b []byte) bool {
+	for _, c := range b {
+		if c < 0x20 && c != '\t' && c != '\n' && c != '\r' || c == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func formatValue(v any, typ string) Value { return formatCell(v, typ, 32) }
+
+// formatCell formats a value as the grid shows it; binary values are cut
+// after show bytes, or kept whole when show is 0 (exports).
+func formatCell(v any, typ string, show int) Value {
 	switch v := v.(type) {
 	case nil:
 		return Value{Text: "NULL", Null: true}
 	case []byte:
+		// MySQL sends BIT values as bytes, most significant first.
+		if strings.EqualFold(typ, "BIT") && len(v) <= 8 {
+			var n uint64
+			for _, b := range v {
+				n = n<<8 | uint64(b)
+			}
+			return Value{Text: strconv.FormatUint(n, 10)}
+		}
 		if strings.EqualFold(typ, "UNIQUEIDENTIFIER") && len(v) == 16 {
 			var u mssql.UniqueIdentifier
 			if u.Scan(v) == nil {
 				return Value{Text: u.String()}
 			}
 		}
-		if utf8.Valid(v) {
+		if utf8.Valid(v) && !hasControl(v) {
 			return Value{Text: string(v)}
 		}
-		const show = 32
+		if show <= 0 {
+			show = len(v)
+		}
 		s := "0x" + strings.ToUpper(hex.EncodeToString(v[:min(len(v), show)]))
 		if len(v) > show {
 			s += "…"
@@ -302,6 +421,18 @@ func Describe(err error) Error {
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
 		return Error{Message: pg.Message, Code: pg.Code, Detail: pg.Detail, Hint: pg.Hint, Position: int(pg.Position)}
+	}
+	var my *mysql.MySQLError
+	if errors.As(err, &my) {
+		e := Error{Message: my.Message, Code: strconv.Itoa(int(my.Number))}
+		if my.SQLState != [5]byte{} {
+			e.Detail = "SQLSTATE " + string(my.SQLState[:])
+		}
+		// "… near 'FORM t' at line 2": the line, for the caret.
+		if m := mysqlLine.FindStringSubmatch(my.Message); m != nil {
+			e.Line, _ = strconv.Atoi(m[1])
+		}
+		return e
 	}
 	var ms mssql.Error
 	if errors.As(err, &ms) {

@@ -42,6 +42,8 @@ type Settings struct {
 	ResultMemoryMB int `toml:"result_memory_mb"`
 	// ScriptRows is the N of the explorer's "first N rows" scripts.
 	ScriptRows int `toml:"script_rows"`
+	// CheckUpdates asks GitHub every 4 hours whether a newer rimor is out.
+	CheckUpdates bool `toml:"check_updates"`
 	// Agent lets AI agents connected through "rimor mcp" read the catalog
 	// and open query tabs; they never run anything.
 	Agent bool `toml:"agent"`
@@ -158,8 +160,7 @@ var Actions = []Action{
 
 // Defaults are the settings used for anything config.toml leaves out.
 func Defaults() Settings {
-	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512, ScriptRows: 100, Agent: true,
-		ChatAgent: "claude"}
+	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512, ScriptRows: 100, CheckUpdates: true, Agent: true, ChatAgent: "claude"}
 }
 
 // Bindings returns the keys of every action: the defaults, replaced by
@@ -316,6 +317,12 @@ func Template() string {
 	b.WriteString(`# Rows the explorer's scripts select (s on a table, view or column).
 `)
 	fmt.Fprintf(&b, "# script_rows = %d\n\n", d.ScriptRows)
+	b.WriteString(`# Every 4 hours, ask GitHub whether a newer rimor is out, and say so above
+# the query. It is one request to api.github.com, without credentials: GitHub
+# sees your address and rimor's version. Installs from a system package
+# manager (the AUR) never ask; it updates them.
+`)
+	fmt.Fprintf(&b, "# check_updates = %t\n\n", d.CheckUpdates)
 	b.WriteString(`# Let AI agents (Claude Code or another MCP client, through "rimor mcp")
 # read the catalog of your connections, but not their credentials, and
 # open query tabs. Agents never run anything: you review and run the tab.

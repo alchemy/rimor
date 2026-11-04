@@ -74,8 +74,34 @@ func splitPassword(d Driver, dsn string) (clean, password string, ok bool) {
 		return splitPair(dsn, pgPairs, " ", "password")
 	case SQLServer:
 		return splitPair(dsn, adoPairs, "; ", "password", "pwd")
+	case MySQL:
+		return splitMySQL(dsn)
 	}
 	return dsn, "", false
+}
+
+// mysqlCredentials finds user[:password] in the driver's own form,
+// user:pass@tcp(host)/db, as go-sql-driver does: the last "/" ends the
+// address, the last "@" before it ends the credentials, and the first
+// ":" in them starts the password.
+func mysqlCredentials(dsn string) (at, colon int, ok bool) {
+	slash := strings.LastIndexByte(dsn, '/')
+	if slash < 0 {
+		return 0, 0, false
+	}
+	at = strings.LastIndexByte(dsn[:slash], '@')
+	if at < 0 {
+		return 0, 0, false
+	}
+	return at, strings.IndexByte(dsn[:at], ':'), true
+}
+
+func splitMySQL(dsn string) (string, string, bool) {
+	at, colon, ok := mysqlCredentials(dsn)
+	if !ok || colon < 0 || colon+1 == at {
+		return dsn, "", false
+	}
+	return dsn[:colon] + dsn[at:], dsn[colon+1 : at], true
 }
 
 // dsnURL parses a connection string in URL form: postgres://,
@@ -86,7 +112,7 @@ func dsnURL(dsn string) (*url.URL, bool) {
 		return nil, false
 	}
 	switch strings.ToLower(scheme) {
-	case "postgres", "postgresql", "sqlserver":
+	case "postgres", "postgresql", "sqlserver", "mysql", "mariadb":
 	default:
 		return nil, false
 	}
@@ -108,6 +134,11 @@ func joinPassword(d Driver, dsn, password string) string {
 	case Postgres:
 		quoted := strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(password)
 		return strings.TrimSpace(dsn + " password='" + quoted + "'")
+	case MySQL:
+		if at, colon, ok := mysqlCredentials(dsn); ok && colon < 0 {
+			return dsn[:at] + ":" + password + dsn[at:]
+		}
+		return dsn
 	case SQLServer:
 		sep := ";"
 		if dsn == "" || strings.HasSuffix(strings.TrimSpace(dsn), ";") {

@@ -161,7 +161,8 @@ func (lite sqlite) describe(ctx context.Context, conn *sql.DB, _, name string) (
 	return t, err
 }
 
-func (sqlite) search(ctx context.Context, conn *sql.DB, pattern string, limit int) ([]Match, error) {
+func (sqlite) search(ctx context.Context, conn *sql.DB, text string, limit int) ([]Match, error) {
+	pattern := likePattern(text)
 	return queryMatches(ctx, conn, `
 		SELECT kind, '', name, col, typ FROM (
 		    SELECT type AS kind, name, '' AS col, '' AS typ FROM sqlite_master

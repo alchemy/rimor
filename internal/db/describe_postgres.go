@@ -117,7 +117,8 @@ func (pg postgres) describe(ctx context.Context, conn *sql.DB, schema, name stri
 	return t, err
 }
 
-func (postgres) search(ctx context.Context, conn *sql.DB, pattern string, limit int) ([]Match, error) {
+func (postgres) search(ctx context.Context, conn *sql.DB, text string, limit int) ([]Match, error) {
+	pattern := likePattern(text)
 	return queryMatches(ctx, conn, `
 		WITH user_schemas AS (
 		    SELECT oid, nspname FROM pg_namespace

@@ -57,7 +57,9 @@ type Model struct {
 
 	undo, redo []snapshot
 	last       editKind
-	clipboard  string
+	clipboard  string // what the editor copied last
+	// A ctrl+v waiting for the terminal's clipboard (see clipboard.go).
+	pasteSeq, pasting int
 
 	lexer          chroma.Lexer
 	classes        [][]class
@@ -222,6 +224,10 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 		m.insert(msg.Content)
 	case tea.KeyPressMsg:
 		cmd = m.handleKey(msg)
+	case tea.ClipboardMsg:
+		m.clipboardAnswered(msg)
+	case PasteTimeoutMsg:
+		m.pasteTimedOut(msg)
 	default:
 		return nil
 	}
@@ -309,9 +315,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return tea.SetClipboard(text)
 	case "ctrl+v":
-		if m.clipboard != "" {
-			m.checkpoint(editOther)
-			m.insert(m.clipboard)
+		if !m.ReadOnly {
+			return m.paste()
 		}
 
 	default:

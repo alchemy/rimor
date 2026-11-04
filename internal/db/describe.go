@@ -88,7 +88,7 @@ var ErrNotFound = errors.New("no such table or view")
 // cataloger is what each driver implements for the agent.
 type cataloger interface {
 	describe(ctx context.Context, conn *sql.DB, schema, name string) (*Table, error)
-	search(ctx context.Context, conn *sql.DB, pattern string, limit int) ([]Match, error)
+	search(ctx context.Context, conn *sql.DB, text string, limit int) ([]Match, error)
 	foreignKeys(ctx context.Context, conn *sql.DB, schema, table string) ([]ForeignKey, error)
 	version(ctx context.Context, conn *sql.DB) (string, error)
 }
@@ -101,6 +101,8 @@ func catalogerFor(d Driver) cataloger {
 		return sqlite{}
 	case SQLServer:
 		return sqlserver{}
+	case MySQL:
+		return mysqlCatalog{}
 	}
 	return nil
 }
@@ -121,7 +123,7 @@ func (p *Pool) Search(ctx context.Context, database, text string, limit int) ([]
 	if err != nil {
 		return nil, err
 	}
-	return catalogerFor(p.cfg.Driver).search(ctx, conn, likePattern(text), limit)
+	return catalogerFor(p.cfg.Driver).search(ctx, conn, text, limit)
 }
 
 // ServerVersion is the engine and its version, e.g. "PostgreSQL 17.2".
