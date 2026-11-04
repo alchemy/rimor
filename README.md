@@ -102,6 +102,9 @@ It supports **PostgreSQL**, **MySQL** and **MariaDB**, **SQL Server** and **SQLi
   read your catalog and open query tabs for you to review and run. It never
   runs anything or sees credentials, and sees result rows only of the tabs
   you share with `alt+a`.
+- **Agent chat.** Or talk to Claude, Codex or Gemini in rimor's fourth
+  pane (`alt+4`), with the same tools and the same limits, and nothing
+  else: no shell, no files.
 - **Keys at hand.** `F1` lists the keys that apply where you are, with
   your own bindings, and filters them as you type.
 - **Configurable.** Shortcuts can be remapped, and a leader key gives every
@@ -393,6 +396,50 @@ Rows you share go to the agent's model provider, like everything the agent
 reads. It also reads your catalog, comments included. To turn agent access off, set `agent = false` in
 `config.toml`.
 
+### The agent chat
+
+The fourth pane, on the right, is a chat with an agent, so you need no
+second terminal. rimor starts the agent through the
+[Agent Client Protocol](https://agentclientprotocol.com) (ACP), the one
+editors such as Zed use, so the chat works with any agent that speaks it.
+Install the adapter of the agents you use, and log in with the agent's
+own CLI first:
+
+| Agent | Adapter |
+|---|---|
+| Claude | `npm install -g @agentclientprotocol/claude-agent-acp` |
+| Codex | `npm install -g @agentclientprotocol/codex-acp` |
+| Gemini | Gemini CLI speaks ACP itself (`gemini --acp`) |
+
+The first time the chat gets the focus (`alt+4`, `alt+c`, a click or
+`tab`), it starts `chat_agent`: Claude unless you change it. `ctrl+n` in
+the chat starts a new one, with any agent. `enter` sends,
+`shift+enter` or `ctrl+j` starts a new line, `esc` stops the answer, and
+`pgup`/`pgdown` or the mouse wheel scroll. Each message tells the agent
+which tab you are on, so "this query" works. The agent's tabs open beside
+the chat, which keeps the focus; run them with the run key as usual, from
+the chat too.
+
+The agent in the chat gets **rimor's tools only**, the ones listed above:
+
+- The session's only MCP server is `rimor mcp`, tied to the rimor it runs
+  in, even with several open.
+- Claude's built-in tools (shell, files, web) are off, and so are the MCP
+  servers of your own Claude configuration. Codex runs read-only, with its
+  shell and image viewer off.
+- Whatever an agent still asks to run, rimor refuses unless it is one of
+  its own tools, and says so in the chat.
+- The agent runs in an empty folder of rimor's state directory.
+
+Other agents go in `config.toml`, as can another command for the
+built-in ones, for instance through `npx` without installing:
+
+```toml
+chat_agent = "codex"
+chat_agents.claude = { command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp"] }
+chat_agents.myagent = { title = "My agent", command = ["my-agent", "--acp"], env = { MY_MODEL = "large" } }
+```
+
 ## Keys
 
 **`F1`** shows the keys that apply where you are: the focused pane or the
@@ -407,9 +454,9 @@ on its own to list them.
 | Keys | Action |
 |---|---|
 | `F1` | The keys that apply here; `tab` in it lists every key |
-| `alt+1` `alt+2` `alt+3` | Focus explorer, query, results |
+| `alt+1` `alt+2` `alt+3` `alt+4` | Focus explorer, query, results, agent chat (also `alt+c`) |
 | `alt+f` | Toggle full screen for the focused pane |
-| `shift+alt+1/2/3` | Show a pane in full screen |
+| `shift+alt+1/2/3/4` | Show a pane in full screen |
 | `ctrl+enter` `F5` `alt+enter` | Run the selection, or the whole tab |
 | `ctrl+t` | New tab, in the context of the explorer's selection |
 | `ctrl+o` | Open a `.sql` file |

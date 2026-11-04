@@ -67,65 +67,71 @@ func (d *driver) run(cmd tea.Cmd) {
 // key sends key presses written like "enter", "a", "ctrl+s" or "alt+1".
 func (d *driver) key(keys ...string) {
 	for _, k := range keys {
-		var msg tea.KeyPressMsg
-		parts := strings.Split(k, "+")
-		base := parts[len(parts)-1]
-		if k == "+" {
-			base, parts = "+", []string{"+"}
-		}
-		for _, mod := range parts[:len(parts)-1] {
-			switch mod {
-			case "ctrl":
-				msg.Mod |= tea.ModCtrl
-			case "alt":
-				msg.Mod |= tea.ModAlt
-			case "shift":
-				msg.Mod |= tea.ModShift
-			}
-		}
-		switch base {
-		case "enter":
-			msg.Code = tea.KeyEnter
-		case "tab":
-			msg.Code = tea.KeyTab
-		case "esc":
-			msg.Code = tea.KeyEscape
-		case "up":
-			msg.Code = tea.KeyUp
-		case "down":
-			msg.Code = tea.KeyDown
-		case "left":
-			msg.Code = tea.KeyLeft
-		case "right":
-			msg.Code = tea.KeyRight
-		case "backspace":
-			msg.Code = tea.KeyBackspace
-		case "delete":
-			msg.Code = tea.KeyDelete
-		case "home":
-			msg.Code = tea.KeyHome
-		case "end":
-			msg.Code = tea.KeyEnd
-		case "pgup":
-			msg.Code = tea.KeyPgUp
-		case "pgdown":
-			msg.Code = tea.KeyPgDown
-		case "space":
-			msg.Code, msg.Text = tea.KeySpace, " "
-		case "f1", "f2", "f5":
-			n, _ := strconv.Atoi(base[1:])
-			msg.Code = tea.KeyF1 + rune(n-1)
-		default:
-			if len([]rune(base)) > 1 {
-				d.t.Fatalf("key: unknown key name %q", base) // never guess a letter
-			}
-			msg.Code = []rune(base)[0]
-			if msg.Mod == 0 {
-				msg.Text = base
-			}
-		}
-		d.send(msg)
+		d.send(keyMsg(d.t, k))
 	}
+}
+
+// keyMsg is the key press written like "enter", "a", "ctrl+s" or "alt+1".
+func keyMsg(t *testing.T, k string) tea.KeyPressMsg {
+	t.Helper()
+	var msg tea.KeyPressMsg
+	parts := strings.Split(k, "+")
+	base := parts[len(parts)-1]
+	if k == "+" {
+		base, parts = "+", []string{"+"}
+	}
+	for _, mod := range parts[:len(parts)-1] {
+		switch mod {
+		case "ctrl":
+			msg.Mod |= tea.ModCtrl
+		case "alt":
+			msg.Mod |= tea.ModAlt
+		case "shift":
+			msg.Mod |= tea.ModShift
+		}
+	}
+	switch base {
+	case "enter":
+		msg.Code = tea.KeyEnter
+	case "tab":
+		msg.Code = tea.KeyTab
+	case "esc":
+		msg.Code = tea.KeyEscape
+	case "up":
+		msg.Code = tea.KeyUp
+	case "down":
+		msg.Code = tea.KeyDown
+	case "left":
+		msg.Code = tea.KeyLeft
+	case "right":
+		msg.Code = tea.KeyRight
+	case "backspace":
+		msg.Code = tea.KeyBackspace
+	case "delete":
+		msg.Code = tea.KeyDelete
+	case "home":
+		msg.Code = tea.KeyHome
+	case "end":
+		msg.Code = tea.KeyEnd
+	case "pgup":
+		msg.Code = tea.KeyPgUp
+	case "pgdown":
+		msg.Code = tea.KeyPgDown
+	case "space":
+		msg.Code, msg.Text = tea.KeySpace, " "
+	case "f1", "f2", "f5":
+		n, _ := strconv.Atoi(base[1:])
+		msg.Code = tea.KeyF1 + rune(n-1)
+	default:
+		if len([]rune(base)) > 1 {
+			t.Fatalf("key: unknown key name %q", base) // never guess a letter
+		}
+		msg.Code = []rune(base)[0]
+		if msg.Mod == 0 {
+			msg.Text = base
+		}
+	}
+	return msg
 }
 
 func (d *driver) typeText(s string) {

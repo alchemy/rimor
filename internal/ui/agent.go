@@ -144,6 +144,14 @@ func (m *Model) agentRequest(msg AgentRequestMsg) tea.Cmd {
 // WithAgentError tells the user that agents cannot reach this rimor.
 func (m Model) WithAgentError(err error) Model {
 	m.query.notice = errorStyle.Render("Agents cannot reach rimor: " + err.Error())
+	m.chat.why = "Agents cannot reach rimor: " + err.Error()
+	return m
+}
+
+// WithAgentSocket lets the chat's agents reach this rimor through its
+// socket; version is rimor's, which they are told.
+func (m Model) WithAgentSocket(path, version string) Model {
+	m.chat.socket, m.chat.version = path, version
 	return m
 }
 
@@ -642,7 +650,8 @@ func (m *Model) agentHandover(t *tab) map[string]any {
 // running it is up to them, a warning when the SQL may write, and the
 // agent's request to read the results.
 func (m *Model) showAgentTab(t *tab, verb string) {
-	if m.modal == nil && m.help == nil {
+	// The tab shows beside the chat; typing there goes on.
+	if m.modal == nil && m.help == nil && m.focus != focusChat {
 		m.setFocus(focusQuery)
 	}
 	// Short enough to fit beside the status line, which shows the agent's

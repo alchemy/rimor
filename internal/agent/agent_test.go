@@ -5,9 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"rimor.dev/internal/paths"
 )
 
 // mcp runs the MCP server over the given messages and returns its
@@ -175,5 +180,41 @@ func TestSocketRoundTrip(t *testing.T) {
 	}
 	if _, err := Call(ctx, "list_tabs", nil); !errors.Is(err, ErrNotRunning) {
 		t.Errorf("after close: %v", err)
+	}
+}
+
+// With RIMOR_SOCKET set, calls go to that rimor, not the newest one.
+func TestSocketFromEnvironment(t *testing.T) {
+	runtimeDir(t)
+	dir, err := paths.MakeRuntime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(name string) *Server {
+		path := filepath.Join(dir, name+".sock")
+		ln, err := net.Listen("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := &Server{ln: ln, path: path}
+		go srv.Serve(func(context.Context, string, json.RawMessage) (any, error) { return name, nil })
+		t.Cleanup(func() { srv.Close() })
+		return srv
+	}
+	first := serve("1")
+	time.Sleep(20 * time.Millisecond) // a later modification time
+	serve("2")
+
+	ctx := context.Background()
+	if res, err := Call(ctx, "list_tabs", nil); err != nil || string(res) != `"2"` {
+		t.Fatalf("newest: %s, %v", res, err)
+	}
+	t.Setenv(SocketEnv, first.Path())
+	if res, err := Call(ctx, "list_tabs", nil); err != nil || string(res) != `"1"` {
+		t.Errorf("named: %s, %v", res, err)
+	}
+	t.Setenv(SocketEnv, filepath.Join(dir, "gone.sock"))
+	if _, err := Call(ctx, "list_tabs", nil); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("named but gone: %v", err)
 	}
 }

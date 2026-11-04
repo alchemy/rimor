@@ -152,9 +152,24 @@ var (
 		{keys: []string{"esc"}, desc: "Clear the selection"},
 	}}
 
+	chatKeys = keyScope{"Agent chat", []binding{
+		{keys: []string{"enter"}, desc: "Send the message"},
+		{keys: []string{"shift+enter", "ctrl+j"}, desc: "New line"},
+		{keys: []string{"esc"}, desc: "Stop the agent's answer", when: func(m *Model) bool {
+			return m.chat.phase == chatBusy
+		}},
+		{keys: []string{"pgup", "pgdown"}, desc: "Scroll the conversation"},
+		{keys: []string{"ctrl+n"}, desc: "New chat: choose an agent"},
+	}}
+
+	chatPickerKeys = keyScope{"Choose an agent", []binding{
+		{keys: []string{"up", "k", "down", "j"}, desc: "Move"},
+		{keys: []string{"enter"}, desc: "Start the agent"},
+	}}
+
 	paneKeys = keyScope{"Panes", []binding{
 		{keys: []string{"tab", "shift+tab"}, desc: "Next / previous pane"},
-		{keys: []string{"1", "2", "3"}, desc: "Explorer, query, results"},
+		{keys: []string{"1", "2", "3", "4"}, desc: "Explorer, query, results, agent chat"},
 		{keys: []string{"?"}, desc: "These keys"},
 		{keys: []string{"q", "ctrl+c"}, desc: "Quit"},
 	}}
@@ -223,6 +238,7 @@ var (
 // allScopes is every key table, in the order the "all keys" view lists
 // them after the app-wide keys.
 var allScopes = []keyScope{
+	chatKeys, chatPickerKeys, cellKeys,
 	paneKeys, explorerKeys, explorerFilterKeys, tabKeys, editorKeys, resultsKeys, messagesKeys, cellKeys,
 	connFormKeys, passwordKeys, pickerKeys, scriptMenuKeys, exportKeys, txKeys, changeKeys, pathKeys, closeTabKeys, confirmDeleteKeys, helpKeys,
 }
@@ -268,6 +284,11 @@ func (m *Model) hereScopes() (string, []keyScope) {
 			return "Messages", []keyScope{messagesKeys, resultsKeys, paneKeys}
 		}
 		return "Results", []keyScope{resultsKeys, paneKeys}
+	case focusChat:
+		if m.chat.typing() {
+			return "Agent chat", []keyScope{chatKeys, editorKeys}
+		}
+		return "Agent chat", []keyScope{chatPickerKeys, paneKeys}
 	}
 	return "Explorer", []keyScope{explorerKeys, paneKeys}
 }

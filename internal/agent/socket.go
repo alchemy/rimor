@@ -166,14 +166,24 @@ func Call(ctx context.Context, tool string, args json.RawMessage) (json.RawMessa
 	return resp.Result, nil
 }
 
-// dial connects to the newest socket that answers.
+// SocketEnv names the variable that points rimor mcp at one rimor's
+// socket. The agent chat sets it for the agents it starts, so they talk to
+// the rimor they run in even when several are open.
+const SocketEnv = "RIMOR_SOCKET"
+
+// dial connects to the socket SocketEnv names, else to the newest socket
+// that answers.
 func dial(ctx context.Context) (net.Conn, error) {
-	dir, err := paths.Runtime()
-	if err != nil {
-		return nil, err
+	candidates := []string{os.Getenv(SocketEnv)}
+	if candidates[0] == "" {
+		dir, err := paths.Runtime()
+		if err != nil {
+			return nil, err
+		}
+		candidates = sockets(dir)
 	}
 	var d net.Dialer
-	for _, path := range sockets(dir) {
+	for _, path := range candidates {
 		dctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		conn, err := d.DialContext(dctx, "unix", path)
 		cancel()

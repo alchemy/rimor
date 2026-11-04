@@ -35,32 +35,34 @@ func TestDragExplorerHandle(t *testing.T) {
 		t.Fatalf("default explorer width = %d", leftW)
 	}
 
-	// Grab the explorer's right border and move it 20 columns right.
-	d.drag(leftW-1, 10, leftW-1+20, 12)
-	if got, _, _ := d.m.layout(); got != 50 {
-		t.Fatalf("after drag width = %d, want 50", got)
+	// Grab the explorer's right border and move it 10 columns right.
+	d.drag(leftW-1, 10, leftW-1+10, 12)
+	if got, _, _ := d.m.layout(); got != 40 {
+		t.Fatalf("after drag width = %d, want 40", got)
 	}
 	d.screen() // every row stays exactly the terminal width
 
 	// Grabbing the other line of the handle works the same way.
-	d.drag(50, 5, 40, 5)
-	if got, _, _ := d.m.layout(); got != 40 {
-		t.Fatalf("after second drag width = %d, want 40", got)
+	d.drag(40, 5, 35, 5)
+	if got, _, _ := d.m.layout(); got != 35 {
+		t.Fatalf("after second drag width = %d, want 35", got)
 	}
 
-	// Dragging past the edges stops at the minimum sizes.
-	d.drag(39, 5, 0, 5)
+	// Dragging past the edges stops at the minimum sizes; the query pane
+	// keeps its minimum beside the chat.
+	d.drag(34, 5, 0, 5)
 	if got, _, _ := d.m.layout(); got != minExplorerWidth {
 		t.Errorf("min clamp = %d", got)
 	}
 	d.drag(minExplorerWidth-1, 5, 119, 5)
-	if got, _, _ := d.m.layout(); got != 120-minRightWidth {
+	if got, _, _ := d.m.layout(); got != 120-d.m.chatWidth()-minRightWidth {
 		t.Errorf("max clamp = %d", got)
 	}
 	d.screen()
 
 	// A double click resets the split.
-	x := 120 - minRightWidth - 1
+	leftW, _, _ = d.m.layout()
+	x := leftW - 1
 	d.click(x, 5)
 	d.send(tea.MouseReleaseMsg{X: x, Y: 5})
 	d.click(x, 5)
@@ -155,9 +157,9 @@ func TestClickFocusesPane(t *testing.T) {
 	}
 	// The editor cursor follows the query pane wherever the border is.
 	d.click(80, 5)
-	d.drag(29, 10, 49, 10)
+	d.drag(29, 10, 39, 10)
 	v := d.m.View()
-	if v.Cursor == nil || v.Cursor.X != 50+1+5 {
+	if v.Cursor == nil || v.Cursor.X != 40+1+5 {
 		t.Errorf("cursor = %+v", v.Cursor)
 	}
 }

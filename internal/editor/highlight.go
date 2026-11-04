@@ -76,6 +76,7 @@ const (
 	TSQL       Language = "tsql"
 	MySQL      Language = "mysql"
 	JSON       Language = "json"
+	Plain      Language = "plaintext" // no highlighting, for prose
 )
 
 func lexerFor(lang Language) chroma.Lexer {

@@ -43,7 +43,8 @@ func agentDriver(t *testing.T) *driver {
 	settings := config.Defaults()
 	settings.Icons = config.IconsPlain
 	d := &driver{t: t, m: New(store, "", settings), wait: 5 * time.Second}
-	d.send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	// Wide enough for the agent's notices beside the chat.
+	d.send(tea.WindowSizeMsg{Width: 160, Height: 30})
 	// Close the file before the temporary directory goes: Windows cannot
 	// delete a file that is open. Sessions go back to their pool, which
 	// closes every connection.
@@ -283,6 +284,9 @@ const joinSQL = "SELECT o.id, c.name FROM orders o JOIN customers c ON c.id = o.
 
 func TestAgentResultsNeedTheUsersGrant(t *testing.T) {
 	d := agentDriver(t)
+	// Wide enough for the notice and the status side by side; narrower,
+	// the notice shows first (see pane.noticeFirst).
+	d.send(tea.WindowSizeMsg{Width: 200, Height: 30})
 	got := d.mustCall("open_query", `{"connection":"ERP","sql":"`+joinSQL+`","want_results":true}`)
 	requireIn(t, got, `"results":"requested`)
 	requireIn(t, d.screen(), "✶ The agent wrote this query · F5 to run", "agent asks for results: alt+a")

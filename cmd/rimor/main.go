@@ -220,6 +220,7 @@ func run(temp *db.Config) error {
 			m = m.WithAgentError(err)
 		} else {
 			defer srv.Close()
+			m = m.WithAgentSocket(srv.Path(), Version())
 		}
 	}
 	m, check := checkUpdates(m, settings.CheckUpdates)

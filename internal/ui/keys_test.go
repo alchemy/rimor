@@ -27,6 +27,8 @@ var handlerScopes = []struct {
 	{"results.go", "*ResultsPane.Update", resultsKeys},
 	{"batch.go", "*ResultsPane.messagesKey", messagesKeys},
 	{"query.go", "*QueryPane.Update", tabKeys},
+	{"chat.go", "*ChatPane.Update", chatKeys},
+	{"chat.go", "*ChatPane.pickerKey", chatPickerKeys},
 	{"cell.go", "*cellPopup.Update", cellKeys},
 	{"modal.go", "*connForm.Update", connFormKeys},
 	{"modal.go", "confirmDelete.Update", confirmDeleteKeys},

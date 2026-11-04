@@ -41,6 +41,7 @@ type session struct {
 type sessionLayout struct {
 	Explorer float64 `json:"explorer"`
 	Query    float64 `json:"query"`
+	Chat     float64 `json:"chat,omitempty"`
 }
 
 // DefaultSessionPath is session.json in the state directory, e.g.

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -45,8 +47,81 @@ type Settings struct {
 	// Agent lets AI agents connected through "rimor mcp" read the catalog
 	// and open query tabs; they never run anything.
 	Agent bool `toml:"agent"`
+	// ChatAgent is the agent the chat starts, one of ChatAgents.
+	ChatAgent string `toml:"chat_agent"`
+	// ChatAgents adds agents to the chat, or replaces the built-in ones
+	// of the same name; see ChatAgentList.
+	ChatAgents map[string]ChatAgentConfig `toml:"chat_agents"`
 	// Keys replaces the bindings of the named actions.
 	Keys map[string][]string `toml:"keys"`
+}
+
+// ChatAgentConfig is how to start an agent for the chat: a program that
+// speaks the Agent Client Protocol on stdin and stdout.
+type ChatAgentConfig struct {
+	Title   string            `toml:"title"`   // shown in the chat; defaults to the name
+	Command []string          `toml:"command"` // program and arguments; empty removes the agent
+	Env     map[string]string `toml:"env"`     // added to rimor's environment
+}
+
+// ChatAgent is a configured chat agent.
+type ChatAgent struct {
+	Name string
+	ChatAgentConfig
+	// Install says how to install a built-in agent's adapter.
+	Install string
+}
+
+// codexLockdown keeps Codex to rimor's tools: no shell, no image viewer,
+// and a read-only sandbox, so it cannot read or change files.
+const codexLockdown = `{"features":{"shell_tool":false,"view_image":false}}`
+
+// BuiltinChatAgents are the ACP adapters of the common agents. Claude's
+// built-in tools are turned off by the chat itself (see ui), Codex's here.
+var BuiltinChatAgents = []ChatAgent{
+	{Name: "claude", ChatAgentConfig: ChatAgentConfig{Title: "Claude", Command: []string{"claude-agent-acp"}},
+		Install: "npm install -g @agentclientprotocol/claude-agent-acp"},
+	{Name: "codex", ChatAgentConfig: ChatAgentConfig{Title: "Codex", Command: []string{"codex-acp"},
+		Env: map[string]string{"INITIAL_AGENT_MODE": "read-only", "CODEX_CONFIG": codexLockdown}},
+		Install: "npm install -g @agentclientprotocol/codex-acp"},
+	{Name: "gemini", ChatAgentConfig: ChatAgentConfig{Title: "Gemini", Command: []string{"gemini", "--acp"}},
+		Install: "npm install -g @google/gemini-cli"},
+}
+
+// ChatAgentList is the chat's agents: the built-in ones, then those
+// config.toml adds in name order; config.toml replaces a built-in agent of
+// the same name, and an empty command removes it.
+func (s Settings) ChatAgentList() []ChatAgent {
+	var out []ChatAgent
+	for _, a := range BuiltinChatAgents {
+		if c, ok := s.ChatAgents[a.Name]; ok {
+			a.ChatAgentConfig = c
+		}
+		if len(a.Command) > 0 {
+			out = append(out, a)
+		}
+	}
+	names := make([]string, 0, len(s.ChatAgents))
+	for name := range s.ChatAgents {
+		if !slices.ContainsFunc(BuiltinChatAgents, func(a ChatAgent) bool { return a.Name == name }) {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		if c := s.ChatAgents[name]; len(c.Command) > 0 {
+			out = append(out, ChatAgent{Name: name, ChatAgentConfig: c})
+		}
+	}
+	return out
+}
+
+// Label is the agent's title, else its name.
+func (a ChatAgent) Label() string {
+	if a.Title != "" {
+		return a.Title
+	}
+	return a.Name
 }
 
 // Action is an app-wide command that can be bound to keys.
@@ -66,10 +141,12 @@ var Actions = []Action{
 	{"focus_explorer", "Focus the explorer", []string{"alt+1", "leader 1"}},
 	{"focus_query", "Focus the query editor", []string{"alt+2", "leader 2"}},
 	{"focus_results", "Focus the results", []string{"alt+3", "leader 3"}},
+	{"focus_chat", "Focus the agent chat", []string{"alt+4", "alt+c", "leader 4", "leader c"}},
 	{"full_screen", "Toggle full screen for the focused pane", []string{"alt+f", "leader f"}},
 	{"full_screen_explorer", "Explorer in full screen", []string{"alt+shift+1", "alt+!", "leader shift+1", "leader !"}},
 	{"full_screen_query", "Query editor in full screen", []string{"alt+shift+2", "alt+@", `alt+"`, "leader shift+2", "leader @", `leader "`}},
 	{"full_screen_results", "Results in full screen", []string{"alt+shift+3", "alt+#", "alt+£", "leader shift+3", "leader #", "leader £"}},
+	{"full_screen_chat", "Agent chat in full screen", []string{"alt+shift+4", "alt+$", "leader shift+4", "leader $"}},
 	{"run", "Run the selection, or the whole tab", []string{"ctrl+enter", "f5", "alt+enter", "leader enter"}},
 	{"new_tab", "New query tab", []string{"ctrl+t", "leader t"}},
 	{"open_file", "Open a .sql file", []string{"ctrl+o", "leader o"}},
@@ -83,7 +160,7 @@ var Actions = []Action{
 
 // Defaults are the settings used for anything config.toml leaves out.
 func Defaults() Settings {
-	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512, ScriptRows: 100, CheckUpdates: true, Agent: true}
+	return Settings{Theme: ThemeAuto, Icons: IconsAuto, Leader: "ctrl+g", ResultMemoryMB: 512, ScriptRows: 100, CheckUpdates: true, Agent: true, ChatAgent: "claude"}
 }
 
 // Bindings returns the keys of every action: the defaults, replaced by
@@ -142,6 +219,23 @@ func (s Settings) validate() error {
 	}
 	if strings.TrimSpace(s.Leader) == "" || strings.Contains(s.Leader, " ") {
 		return fmt.Errorf("leader must be a single key such as \"ctrl+g\", not %q", s.Leader)
+	}
+
+	for name, c := range s.ChatAgents {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("[chat_agents]: empty agent name")
+		}
+		if len(c.Command) > 0 && strings.TrimSpace(c.Command[0]) == "" {
+			return fmt.Errorf("[chat_agents.%s]: empty command", name)
+		}
+	}
+	agents := s.ChatAgentList()
+	if !slices.ContainsFunc(agents, func(a ChatAgent) bool { return a.Name == s.ChatAgent }) {
+		names := make([]string, len(agents))
+		for i, a := range agents {
+			names[i] = fmt.Sprintf("%q", a.Name)
+		}
+		return fmt.Errorf("chat_agent must be one of the chat agents (%s), not %q", strings.Join(names, ", "), s.ChatAgent)
 	}
 
 	known := map[string]bool{}
@@ -234,19 +328,59 @@ func Template() string {
 # open query tabs. Agents never run anything: you review and run the tab.
 `)
 	fmt.Fprintf(&b, "# agent = %t\n\n", d.Agent)
+	b.WriteString(`# The agent chat (alt+4) talks to an AI agent inside rimor, through the
+# Agent Client Protocol (ACP). The agent gets rimor's tools only: no shell,
+# no files. Like any agent it never runs SQL: it opens tabs that you review
+# and run. It needs agent access (the setting above) and the agent's ACP
+# adapter, installed and logged in with the agent's own CLI:
+#   claude  npm install -g @agentclientprotocol/claude-agent-acp
+#   codex   npm install -g @agentclientprotocol/codex-acp
+#   gemini  Gemini CLI, which speaks ACP itself
+# chat_agent starts when the chat first gets the focus; ctrl+n there picks
+# another.
+`)
+	fmt.Fprintf(&b, "# chat_agent = %q\n\n", d.ChatAgent)
+	b.WriteString(`# The chat's agents: a title, the command that starts the adapter, and
+# variables added to its environment. An entry replaces the built-in agent
+# of the same name, an empty command removes it, and a new name adds one.
+# To run an adapter without installing it, start it with npx, as in
+# ["npx", "-y", "@agentclientprotocol/claude-agent-acp"].
+`)
+	for _, a := range BuiltinChatAgents {
+		fmt.Fprintf(&b, "# chat_agents.%s = %s\n", a.Name, a.inlineTable())
+	}
+	b.WriteString("\n")
 	b.WriteString(`# App-wide shortcuts. Binding an action replaces all of its default keys.
 # "leader x" means the leader key, then x. Keys inside panes (the editor,
 # the explorer, the results grid) are not remappable yet.
 [keys]
 `)
 	for _, a := range Actions {
-		quoted := make([]string, len(a.Defaults))
-		for i, k := range a.Defaults {
-			quoted[i] = tomlString(k)
-		}
-		fmt.Fprintf(&b, "# %s\n# %s = [%s]\n", a.Description, a.Name, strings.Join(quoted, ", "))
+		fmt.Fprintf(&b, "# %s\n# %s = [%s]\n", a.Description, a.Name, quoteAll(a.Defaults))
 	}
 	return b.String()
+}
+
+// inlineTable writes the agent's settings as a TOML inline table.
+func (a ChatAgent) inlineTable() string {
+	fields := []string{"title = " + tomlString(a.Title), "command = [" + quoteAll(a.Command) + "]"}
+	if len(a.Env) > 0 {
+		var env []string
+		for _, k := range slices.Sorted(maps.Keys(a.Env)) {
+			env = append(env, k+" = "+tomlString(a.Env[k]))
+		}
+		fields = append(fields, "env = { "+strings.Join(env, ", ")+" }")
+	}
+	return "{ " + strings.Join(fields, ", ") + " }"
+}
+
+// quoteAll quotes each string for a TOML array.
+func quoteAll(ss []string) string {
+	quoted := make([]string, len(ss))
+	for i, k := range ss {
+		quoted[i] = tomlString(k)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // tomlString quotes a key for TOML, preferring literal strings so that
