@@ -11,6 +11,7 @@ import (
 const (
 	defaultExplorerFrac = 0.25
 	defaultQueryFrac    = 0.35
+	defaultChatFrac     = 0.3
 )
 
 // Smallest sizes a pane can be dragged to, borders included.
@@ -19,6 +20,7 @@ const (
 	minRightWidth    = 40
 	minQueryHeight   = 4
 	minResultsHeight = 5
+	minChatWidth     = 30
 )
 
 // Steps for keyboard resizing.
@@ -36,6 +38,7 @@ const (
 	handleNone handle = iota
 	handleExplorer
 	handleQuery
+	handleChat
 )
 
 // layout holds the split positions as fractions of the screen so they
@@ -43,6 +46,7 @@ const (
 type layout struct {
 	explorerFrac float64 // explorer width / screen width
 	queryFrac    float64 // query height / screen height
+	chatFrac     float64 // chat width / screen width
 
 	// full shows only the focused pane, filling the screen.
 	full bool
@@ -56,7 +60,7 @@ type layout struct {
 }
 
 func defaultLayout() layout {
-	return layout{explorerFrac: defaultExplorerFrac, queryFrac: defaultQueryFrac}
+	return layout{explorerFrac: defaultExplorerFrac, queryFrac: defaultQueryFrac, chatFrac: defaultChatFrac}
 }
 
 // clampSplit keeps a split between min sizes on both sides, sharing the
@@ -69,15 +73,30 @@ func clampSplit(v, total, minBefore, minAfter int) int {
 }
 
 // layout returns the explorer width and the query and results heights.
+// The query and results panes take the width the explorer and the chat
+// leave.
 func (m Model) layout() (leftW, topH, bottomH int) {
-	leftW = clampSplit(int(math.Round(float64(m.width)*m.split.explorerFrac)), m.width, minExplorerWidth, minRightWidth)
+	leftW = clampSplit(int(math.Round(float64(m.width)*m.split.explorerFrac)), m.width-m.chatWidth(), minExplorerWidth, minRightWidth)
 	topH = clampSplit(int(math.Round(float64(m.height)*m.split.queryFrac)), m.height, minQueryHeight, minResultsHeight)
 	return leftW, topH, m.height - topH
 }
 
+// chatWidth is the width of the chat column on the right.
+func (m Model) chatWidth() int {
+	w := int(math.Round(float64(m.width) * m.split.chatFrac))
+	return clampSplit(w, m.width-minExplorerWidth, minChatWidth, minRightWidth)
+}
+
+// setChatWidth moves the chat border so the chat is chatW columns wide.
+func (m *Model) setChatWidth(chatW int) {
+	chatW = clampSplit(chatW, m.width-minExplorerWidth, minChatWidth, minRightWidth)
+	m.split.chatFrac = float64(chatW) / float64(m.width)
+	m.resize()
+}
+
 // setExplorerWidth moves the explorer border to leftW columns.
 func (m *Model) setExplorerWidth(leftW int) {
-	leftW = clampSplit(leftW, m.width, minExplorerWidth, minRightWidth)
+	leftW = clampSplit(leftW, m.width-m.chatWidth(), minExplorerWidth, minRightWidth)
 	m.split.explorerFrac = float64(leftW) / float64(m.width)
 	m.resize()
 }
@@ -97,12 +116,15 @@ func (m *Model) resize() {
 		m.explorer.SetSize(m.width-2, m.height-2)
 		m.query.SetSize(m.width-2, m.height-2)
 		m.results.SetSize(m.width-2, m.height-2)
+		m.chat.SetSize(m.width-2, m.height-2)
 		return
 	}
 	leftW, topH, bottomH := m.layout()
+	chatW := m.chatWidth()
 	m.explorer.SetSize(leftW-2, m.height-2)
-	m.query.SetSize(m.width-leftW-2, topH-2)
-	m.results.SetSize(m.width-leftW-2, bottomH-2)
+	m.query.SetSize(m.width-leftW-chatW-2, topH-2)
+	m.results.SetSize(m.width-leftW-chatW-2, bottomH-2)
+	m.chat.SetSize(max(chatW-2, 0), m.height-2)
 }
 
 // handleAt finds the handle under a cell. Each handle is the pair of
@@ -112,10 +134,13 @@ func (m Model) handleAt(x, y int) handle {
 		return handleNone
 	}
 	leftW, topH, _ := m.layout()
+	chatX := m.width - m.chatWidth() // the chat's left edge
 	switch {
 	case x == leftW-1 || x == leftW:
 		return handleExplorer
-	case x > leftW && (y == topH-1 || y == topH):
+	case chatX < m.width && (x == chatX-1 || x == chatX):
+		return handleChat
+	case x > leftW && x < chatX-1 && (y == topH-1 || y == topH):
 		return handleQuery
 	}
 	return handleNone
@@ -130,6 +155,8 @@ func (m Model) paneAt(x, y int) focus {
 	switch {
 	case x < leftW:
 		return focusExplorer
+	case x >= m.width-m.chatWidth():
+		return focusChat
 	case y < topH:
 		return focusQuery
 	}
@@ -152,7 +179,7 @@ func (m *Model) resizeAction(action string) {
 	case "grow_query":
 		m.setQueryHeight(topH + resizeStepRows)
 	case "reset_layout":
-		m.split.explorerFrac, m.split.queryFrac = defaultExplorerFrac, defaultQueryFrac
+		m.split.explorerFrac, m.split.queryFrac, m.split.chatFrac = defaultExplorerFrac, defaultQueryFrac, defaultChatFrac
 		m.resize()
 	}
 	m.saveSession()
@@ -172,13 +199,17 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			m.setFocus(m.paneAt(mouse.X, mouse.Y))
 			return nil
 		}
+		chatX := m.width - m.chatWidth()
 		// A second click on the same handle resets that split.
 		now := time.Now()
 		if h == m.split.lastClicked && now.Sub(m.split.lastClick) < doubleClick {
 			m.split.lastClicked = handleNone
-			if h == handleExplorer {
+			switch h {
+			case handleExplorer:
 				m.split.explorerFrac = defaultExplorerFrac
-			} else {
+			case handleChat:
+				m.split.chatFrac = defaultChatFrac
+			default:
 				m.split.queryFrac = defaultQueryFrac
 			}
 			m.resize()
@@ -187,9 +218,12 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 		m.split.lastClick, m.split.lastClicked = now, h
 		m.split.drag = h
-		if h == handleExplorer {
+		switch h {
+		case handleExplorer:
 			m.split.grab = mouse.X - leftW
-		} else {
+		case handleChat:
+			m.split.grab = mouse.X - chatX
+		default:
 			m.split.grab = mouse.Y - topH
 		}
 
@@ -202,9 +236,21 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			m.setExplorerWidth(mouse.X - m.split.grab)
 		case handleQuery:
 			m.setQueryHeight(mouse.Y - m.split.grab)
+		case handleChat:
+			m.setChatWidth(m.width - (mouse.X - m.split.grab))
 		default:
 			if m.modal == nil {
 				m.split.hover = m.handleAt(mouse.X, mouse.Y)
+			}
+		}
+
+	case tea.MouseWheelMsg:
+		if m.modal == nil && m.paneAt(mouse.X, mouse.Y) == focusChat {
+			switch mouse.Button {
+			case tea.MouseWheelUp:
+				m.chat.scroll(3)
+			case tea.MouseWheelDown:
+				m.chat.scroll(-3)
 			}
 		}
 

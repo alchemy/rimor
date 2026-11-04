@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/lipgloss/v2"
@@ -18,6 +19,7 @@ const (
 	focusExplorer focus = iota
 	focusQuery
 	focusResults
+	focusChat
 	focusCount
 )
 
@@ -40,6 +42,7 @@ type Model struct {
 	explorer    Explorer
 	query       QueryPane
 	results     ResultsPane
+	chat        ChatPane
 	sessionPath string // "" disables the session file
 	modal       modal  // nil when no dialog is open
 	split       layout
@@ -72,12 +75,14 @@ func New(store db.Store, sessionPath string, settings config.Settings) Model {
 			focusQuery:    {index: 2, title: "Query"},
 			focusResults: {index: 3, title: "Results",
 				footer: hints(helpKey(keys.first("help", false)), "keys", shortKey(keys.first("quit", false)), "quit")},
+			focusChat: {index: 4, title: "Agent"},
 		},
 		keys:        keys,
 		theme:       theme,
 		explorer:    NewExplorer(store),
 		sessionPath: sessionPath,
 		split:       defaultLayout(),
+		chat:        newChatPane(settings),
 	}
 	m.updateRunHint()
 	limit := int64(settings.ResultMemoryMB) << 20
@@ -93,6 +98,9 @@ func New(store db.Store, sessionPath string, settings config.Settings) Model {
 		if l := s.Layout; l != nil && l.Explorer > 0 && l.Explorer < 1 && l.Query > 0 && l.Query < 1 {
 			m.split.explorerFrac, m.split.queryFrac = l.Explorer, l.Query
 		}
+		if l := s.Layout; l != nil && l.Chat > 0 && l.Chat < 1 {
+			m.split.chatFrac = l.Chat
+		}
 	}
 	if len(m.query.tabs) == 0 {
 		m.query.NewTab(queryContext{})
@@ -100,16 +108,19 @@ func New(store db.Store, sessionPath string, settings config.Settings) Model {
 	return m
 }
 
-// Close saves the session and releases open connections.
+// Close saves the session, ends the chat's agent and releases open
+// connections.
 func (m Model) Close() {
 	m.saveSession()
+	m.chat.Close()
 	m.explorer.Close()
 }
 
 func (m Model) saveSession() {
 	if m.sessionPath != "" {
 		s := m.query.snapshot()
-		s.Layout = &sessionLayout{Explorer: m.split.explorerFrac, Query: m.split.queryFrac}
+		s.Layout = &sessionLayout{Explorer: m.split.explorerFrac, Query: m.split.queryFrac,
+			Chat: m.split.chatFrac}
 		_ = saveSession(m.sessionPath, s)
 	}
 }
@@ -127,6 +138,30 @@ func (m *Model) setFocus(f focus) {
 	} else {
 		m.query.Blur()
 	}
+	if f == focusChat {
+		m.chat.Focus()
+	} else {
+		m.chat.Blur()
+	}
+}
+
+// chatContext tells the agent where the user is in rimor, so that "this
+// query" means something.
+func (m *Model) chatContext() string {
+	t := m.query.current()
+	if t == nil {
+		return ""
+	}
+	s := fmt.Sprintf("the user is on query tab %d, %q", t.id, t.title())
+	if c := t.ctx.conn; c != nil {
+		s += fmt.Sprintf(", which runs on connection %q", c.cfg().Name)
+		if t.ctx.database != "" {
+			s += fmt.Sprintf(", database %q", t.ctx.database)
+		}
+	} else {
+		s += ", which has no connection"
+	}
+	return s + "; read_tab gives its SQL and selection."
 }
 
 // updateRunHint shows the first run key this terminal can report.
@@ -145,6 +180,13 @@ func (m *Model) setFullScreen(on bool) {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.update(msg)
+	// The chat's agent starts when the chat first gets the focus, however
+	// it got it: a key, a click, tab.
+	if m.focus == focusChat {
+		if start := m.chat.autoStart(); start != nil {
+			cmd = tea.Batch(cmd, start)
+		}
+	}
 	if p, ok := m.modal.(*contextPicker); ok {
 		p.refresh(&m.explorer)
 	}
@@ -230,6 +272,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 	case AgentRequestMsg:
 		return m.agentRequest(msg)
+	case chatMsg:
+		return m.chat.Event(msg)
 	case scriptsReadyMsg:
 		return m.scriptsReady(msg)
 	case openScriptMsg:
@@ -311,6 +355,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		switch {
 		case m.focus == focusQuery:
 			return m.query.Update(msg)
+		case m.focus == focusChat:
+			return m.chat.Update(msg, m.chatContext())
 		case m.focus == focusExplorer && m.explorer.filtering:
 			return m.explorer.Update(msg)
 		}
@@ -378,6 +424,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.focus == focusQuery {
 		return m.query.Update(msg)
 	}
+	if m.focus == focusChat && m.chat.typing() {
+		return m.chat.Update(msg, m.chatContext())
+	}
 	// The explorer's filter takes typing, as the editor does.
 	if m.focus == focusExplorer && m.explorer.filtering {
 		return m.explorer.Update(msg)
@@ -393,7 +442,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "shift+tab":
 		m.setFocus((m.focus + focusCount - 1) % focusCount)
 		return nil
-	case "1", "2", "3":
+	case "1", "2", "3", "4":
 		m.setFocus(focus(key[0] - '1'))
 		return nil
 	case "?":
@@ -405,6 +454,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.explorer.Update(msg)
 	case focusResults:
 		return m.results.Update(msg, m.query.current())
+	case focusChat:
+		return m.chat.Update(msg, m.chatContext())
 	}
 	return nil
 }
@@ -445,6 +496,16 @@ func (m Model) View() tea.View {
 		}
 	}
 	if m.modal == nil && m.help == nil && m.width >= minWidth && m.height >= minHeight {
+		if x, y, ok := m.chat.Cursor(); ok {
+			left := 0 // the chat pane's left edge
+			if !m.split.full {
+				left = m.width - m.chatWidth()
+			}
+			c := tea.NewCursor(left+1+x, 1+y)
+			c.Shape = tea.CursorBar
+			c.Color = colorAccent
+			v.Cursor = c
+		}
 		if x, y, ok := m.query.Cursor(); ok {
 			left := 0 // the query pane's left edge
 			if !m.split.full {
@@ -491,14 +552,24 @@ func (m Model) renderPane(f focus, width, height int) string {
 		return p.render(m.explorer.View(focused), width, height, focused)
 
 	case focusQuery:
-		p.hotLeft, p.hotBottom = hot == handleExplorer, hot == handleQuery
+		p.hotLeft, p.hotBottom, p.hotRight = hot == handleExplorer, hot == handleQuery, hot == handleChat
 		p.label = m.query.Tabs(width-2-8-lipgloss.Width(p.corner), focused)
 		p.status = m.query.Status()
 		p.footer = m.query.Footer(focused)
+		p.noticeFirst = m.query.notice != ""
 		return p.render(m.query.View(), width, height, focused)
+
+	case focusChat:
+		p.hotLeft = hot == handleChat
+		if m.chat.label != "" && m.chat.phase != chatPicking {
+			p.title = "Agent · " + m.chat.label
+		}
+		p.status = m.chat.Status()
+		p.footer = m.chat.Footer(focused)
+		return p.render(m.chat.View(), width, height, focused)
 	}
 
-	p.hotLeft, p.hotTop = hot == handleExplorer, hot == handleQuery
+	p.hotLeft, p.hotTop, p.hotRight = hot == handleExplorer, hot == handleQuery, hot == handleChat
 	cur, spin := m.query.current(), m.query.spinner.View()
 	p.status = m.results.Status(cur, spin)
 	if foot := m.results.Footer(cur, focused); foot != "" {
@@ -530,11 +601,16 @@ func (m Model) render() string {
 		base = m.renderPane(m.focus, m.width, m.height)
 	} else {
 		leftW, topH, bottomH := m.layout()
-		rightW := m.width - leftW
-		right := lipgloss.JoinVertical(lipgloss.Left,
-			m.renderPane(focusQuery, rightW, topH),
-			m.renderPane(focusResults, rightW, bottomH))
-		base = lipgloss.JoinHorizontal(lipgloss.Top, m.renderPane(focusExplorer, leftW, m.height), right)
+		chatW := m.chatWidth()
+		midW := m.width - leftW - chatW
+		mid := lipgloss.JoinVertical(lipgloss.Left,
+			m.renderPane(focusQuery, midW, topH),
+			m.renderPane(focusResults, midW, bottomH))
+		cols := []string{m.renderPane(focusExplorer, leftW, m.height), mid}
+		if chatW > 0 {
+			cols = append(cols, m.renderPane(focusChat, chatW, m.height))
+		}
+		base = lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	}
 	// Dialogs, then the key help over everything.
 	layers := []*lipgloss.Layer{lipgloss.NewLayer(base)}

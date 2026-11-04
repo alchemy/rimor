@@ -31,6 +31,9 @@ type pane struct {
 
 	// corner sits at the right end of the top edge, e.g. a mode indicator.
 	corner string
+
+	// noticeFirst keeps the footer
+	noticeFirst bool
 }
 
 // render draws the pane at exactly width×height cells.
@@ -91,13 +94,21 @@ func (p pane) render(body string, width, height int, focused bool) string {
 	}
 
 	// Bottom edge: status on the left, footer on the right. The footer goes
-	// first when both do not fit.
+	// first when both do not fit, unless it is a notice.
 	status, foot := "", ""
 	if p.status != "" {
 		status = " " + ansi.Truncate(p.status, max(innerW-4, 0), "…") + " "
 	}
-	if p.footer != "" && lipgloss.Width(status)+lipgloss.Width(p.footer)+5 <= innerW {
+	switch {
+	case p.footer == "":
+	case lipgloss.Width(status)+lipgloss.Width(p.footer)+5 <= innerW:
 		foot = " " + p.footer + " "
+	case p.noticeFirst:
+		foot = " " + ansi.Truncate(p.footer, max(innerW-4, 0), "…") + " "
+		status = ""
+		if room := innerW - lipgloss.Width(foot) - 5; p.status != "" && room >= 10 {
+			status = " " + ansi.Truncate(p.status, room-2, "…") + " "
+		}
 	}
 	b.WriteString(edge(p.hotBottom, "╰"))
 	fill = innerW - 1 - lipgloss.Width(foot)

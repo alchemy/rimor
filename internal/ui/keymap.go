@@ -119,6 +119,11 @@ func (m *Model) do(action string) tea.Cmd {
 		m.setFocus(focusQuery)
 	case "focus_results":
 		m.setFocus(focusResults)
+	case "focus_chat":
+		m.setFocus(focusChat)
+	case "full_screen_chat":
+		m.setFocus(focusChat)
+		m.setFullScreen(true)
 	case "full_screen":
 		m.setFullScreen(!m.split.full)
 	case "full_screen_explorer", "full_screen_query", "full_screen_results":

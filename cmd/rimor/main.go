@@ -89,6 +89,7 @@ func run() error {
 			m = m.WithAgentError(err)
 		} else {
 			defer srv.Close()
+			m = m.WithAgentSocket(srv.Path(), Version())
 		}
 	}
 	p := tea.NewProgram(m)
